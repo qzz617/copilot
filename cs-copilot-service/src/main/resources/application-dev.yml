@@ -1,0 +1,25 @@
+spring:
+  kafka:
+    bootstrap-servers: localhost:9092
+
+  redis:
+    host: localhost
+    port: 6379
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/cccs_dev
+    username: cccs_dev
+    password: cccs_dev
+
+copilot:
+  ai:
+    url: http://localhost:8081  # 本地用 WireMock Mock AI
+  gray:
+    operator-whitelist:
+      - ho212121
+      - ho999999  # 开发测试用
+
+logging:
+  level:
+    root: INFO
+    com.cmbchina.cs.assitsvc: DEBUG

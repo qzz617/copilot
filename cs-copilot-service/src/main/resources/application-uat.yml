@@ -1,0 +1,22 @@
+spring:
+  kafka:
+    bootstrap-servers: ${KAFKA_BROKERS_UAT:placeholder:9092}
+
+  redis:
+    host: ${REDIS_HOST_UAT:placeholder}
+    port: ${REDIS_PORT_UAT:6379}
+
+  datasource:
+    url: ${DATASOURCE_URL_UAT:placeholder}
+    username: ${DATASOURCE_USERNAME_UAT:placeholder}
+    password: ${DATASOURCE_PASSWORD_UAT:placeholder}
+
+copilot:
+  ai:
+    url: ${AI_INTENT_URL_UAT:http://aicscopilotreplygensop.sk.aipower3.cmbchina.cn}
+  url-whitelist:
+    - frdctrfront.paasuat.cmbchina.cn
+    - mccusweb.paasuat.cmbchina.cn
+  url-builder:
+    # UAT 环境不拦截 UAT 域名
+    uat-domains: []

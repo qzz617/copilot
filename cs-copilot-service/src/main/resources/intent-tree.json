@@ -1,0 +1,60 @@
+{
+  "intentName": "ROOT",
+  "intentCode": "ROOT",
+  "version": "TREE_FIXED_V1",
+  "children": [
+    {
+      "intentName": "账务查询",
+      "intentCode": "BILL_QUERY_DOMAIN",
+      "children": [
+        {
+          "intentName": "账单查询",
+          "intentCode": "INTENT_BILL_QUERY",
+          "parentIntentCode": "BILL_QUERY_DOMAIN"
+        },
+        {
+          "intentName": "交易查询",
+          "intentCode": "INTENT_TRANSACTION_HISTORY",
+          "parentIntentCode": "BILL_QUERY_DOMAIN"
+        },
+        {
+          "intentName": "积分查询",
+          "intentCode": "INTENT_POINTS_QUERY",
+          "parentIntentCode": "BILL_QUERY_DOMAIN"
+        }
+      ]
+    },
+    {
+      "intentName": "账户管理",
+      "intentCode": "ACCOUNT_MANAGE_DOMAIN",
+      "children": [
+        {
+          "intentName": "卡片激活",
+          "intentCode": "INTENT_CARD_ACTIVATE",
+          "parentIntentCode": "ACCOUNT_MANAGE_DOMAIN"
+        },
+        {
+          "intentName": "卡片挂失",
+          "intentCode": "INTENT_CARD_LOSS_REPORT",
+          "parentIntentCode": "ACCOUNT_MANAGE_DOMAIN"
+        },
+        {
+          "intentName": "额度调整",
+          "intentCode": "INTENT_CREDIT_LIMIT_ADJUST",
+          "parentIntentCode": "ACCOUNT_MANAGE_DOMAIN"
+        }
+      ]
+    },
+    {
+      "intentName": "境外服务",
+      "intentCode": "ABROAD_SERVICE_DOMAIN",
+      "children": [
+        {
+          "intentName": "境外行程报备",
+          "intentCode": "INTENT_TRAVEL_DECLARE",
+          "parentIntentCode": "ABROAD_SERVICE_DOMAIN"
+        }
+      ]
+    }
+  ]
+}

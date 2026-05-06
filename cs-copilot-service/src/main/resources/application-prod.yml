@@ -1,0 +1,31 @@
+spring:
+  kafka:
+    bootstrap-servers: ${KAFKA_BROKERS_PROD:placeholder:9092}
+
+  redis:
+    host: ${REDIS_HOST_PROD:placeholder}
+    port: ${REDIS_PORT_PROD:6379}
+    password: ${REDIS_PASSWORD_PROD:placeholder}
+
+  datasource:
+    url: ${DATASOURCE_URL_PROD:placeholder}
+    username: ${DATASOURCE_USERNAME_PROD:placeholder}
+    password: ${DATASOURCE_PASSWORD_PROD:placeholder}
+
+copilot:
+  ai:
+    url: ${AI_INTENT_URL_PROD:http://aicscopilotreplygensop.sk.aipower3.cmbchina.cn}
+  url-whitelist:
+    - frdctrfront.paas.cmbchina.cn
+    - mccusweb.paas.cmbchina.cn
+    - cccsweb.paas.cmbchina.cn
+  url-builder:
+    # 生产环境拦截 UAT 域名
+    uat-domains:
+      - frdctrfront.paasuat.cmbchina.cn
+      - mccusweb.paasuat.cmbchina.cn
+
+logging:
+  level:
+    root: WARN
+    com.cmbchina.cs.assitsvc: INFO

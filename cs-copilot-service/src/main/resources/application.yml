@@ -1,0 +1,167 @@
+spring:
+  application:
+    name: cs-copilot-service
+  profiles:
+    active: dev
+
+  # ============= Kafka 配置（ASR 消息消费） =============
+  kafka:
+    bootstrap-servers: ${KAFKA_BROKERS:localhost:9092}
+    consumer:
+      group-id: copilot-asr-consumer
+      auto-offset-reset: latest
+      enable-auto-commit: false
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      properties:
+        max.poll.records: 50
+        session.timeout.ms: 30000
+    listener:
+      ack-mode: MANUAL_IMMEDIATE
+      concurrency: 4
+
+  # ============= Redis 配置（Jedis 客户端，不是 Lettuce） =============
+  redis:
+    host: ${REDIS_HOST:localhost}
+    port: ${REDIS_PORT:6379}
+    password: ${REDIS_PASSWORD:}
+    database: 0
+    timeout: 2000ms
+    jedis:
+      pool:
+        max-active: 20
+        max-idle: 10
+        min-idle: 2
+        max-wait: 2000ms
+
+  # ============= 数据源（cs_menu_* 等存量表 + Copilot 新增表） =============
+  datasource:
+    url: ${DATASOURCE_URL:jdbc:postgresql://localhost:5432/cccs}
+    username: ${DATASOURCE_USERNAME:cccs}
+    password: ${DATASOURCE_PASSWORD:cccs}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+
+# ============= Spring Cloud OpenFeign 配置 =============
+feign:
+  client:
+    config:
+      ai-intent-client:
+        connect-timeout: 1000
+        read-timeout: 3000
+        logger-level: BASIC
+  compression:
+    request:
+      enabled: true
+    response:
+      enabled: true
+
+# ============= Resilience4j 熔断（M06 AI 接口） =============
+resilience4j:
+  circuitbreaker:
+    instances:
+      aiIntentClient:
+        sliding-window-size: 50
+        failure-rate-threshold: 50
+        slow-call-duration-threshold: 3s
+        slow-call-rate-threshold: 80
+        permitted-number-of-calls-in-half-open-state: 3
+        wait-duration-in-open-state: 30s
+        record-exceptions:
+          - feign.RetryableException
+          - feign.FeignException
+
+# ============= Copilot 业务配置 =============
+copilot:
+  # ASR 接入
+  asr:
+    topic: cs.asr.sentences
+    min-text-length: 4
+    asr-confidence-threshold: 0.65
+    # confidence 缺失策略：true=允许通过，false=拒绝
+    asr-confidence-default-pass: true
+
+  # 防抖参数
+  debounce:
+    complete-ms: 500
+    neutral-ms: 1500
+    incomplete-ms: 3000
+    silence-ms: 2000
+
+  # 意图树（配置文件，本期固定值）
+  intent-tree:
+    file: classpath:intent-tree.json
+    version: TREE_FIXED_V1
+
+  # AI 接口
+  ai:
+    url: ${AI_INTENT_URL:http://aicscopilotreplygensop.sk.aipower3.cmbchina.cn}
+    connect-timeout-ms: 1000
+    read-timeout-ms: 3000
+
+  # URL 白名单
+  url-whitelist:
+    - frdctrfront.paas.cmbchina.cn
+    - mccusweb.paas.cmbchina.cn
+    - cccsweb.paas.cmbchina.cn
+
+  # URL Builder 配置（DD-V1.2 P0-5）
+  url-builder:
+    # 生产环境拦截这些 UAT 域名
+    uat-domains:
+      - frdctrfront.paasuat.cmbchina.cn
+      - mccusweb.paasuat.cmbchina.cn
+    # 同名参数冲突策略：OVERRIDE / PRESERVE / ERROR
+    same-key-policy: OVERRIDE
+
+  # Cookie 占位符配置（DD-V1.2 P0-4）
+  cookie-placeholder:
+    enabled: true
+    # 允许使用的 Cookie 名白名单
+    allowed-cookies:
+      - workbenchSession
+    # Cookie 与目标域名绑定
+    domain-bindings:
+      frdctrfront.paas.cmbchina.cn:
+        - workbenchSession
+    # 必填 Cookie（缺失时阻断打开，不保留占位符）
+    required-cookies:
+      - workbenchSession
+
+  # 单通话限制（DD-V1.2 P1-4）
+  call-limits:
+    max-ai-calls: 50
+    max-history-size: 50
+    intent-cooldown-sec: 60
+
+  # 灰度白名单（DD-V1.2 P1-9，最简方案）
+  gray:
+    enabled: true
+    # 仅这些坐席能收到 Copilot 推荐
+    operator-whitelist:
+      - ho212121
+
+  # 多 Pod 配置一致性轮询（DD-V1.2 P1-17）
+  config-refresh:
+    polling-interval-ms: 30000
+
+# ============= 日志配置 =============
+logging:
+  level:
+    root: INFO
+    com.cmbchina.cs.assitsvc: INFO
+    org.springframework.kafka: WARN
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level [%X{traceId},%X{callId}] %logger{36} - %msg%n"
+
+# ============= Spring Boot Actuator =============
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: when-authorized
