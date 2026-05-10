@@ -24,10 +24,11 @@ public interface DialogHistoryManager {
 
     /**
      * 返回指定通话的完整历史列表，按追加顺序排列。
-     * Redis 不可达时返回空列表，不抛异常。
+     * Redis 不可达时返回空列表，不抛异常。callId 无历史记录时同样返回空列表。
      *
      * @param callId 通话 ID，不可为 null/空
      * @return 对话消息列表（可能为空，不为 null）
+     * @throws IllegalArgumentException 若 callId 为 null/空
      */
     List<DialogMessage> getHistory(String callId);
 
@@ -36,6 +37,7 @@ public interface DialogHistoryManager {
      * Redis 不可达时仅记录 WARN，不抛异常。
      *
      * @param callId 通话 ID，不可为 null/空
+     * @throws IllegalArgumentException 若 callId 为 null/空
      */
     void cleanup(String callId);
 }
