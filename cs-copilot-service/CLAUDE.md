@@ -2,6 +2,30 @@
 
 > 本文件是 Claude Code 处理本项目的入口。每次开始新对话时阅读本文件后再执行任务。
 
+
+## ⚠️ Superpowers 行为覆盖（重要）
+
+本项目使用 obra/superpowers 插件，但有以下行为覆盖（用户指令优先于 superpowers 默认行为）：
+
+### 必须遵守
+1. **不写单元测试**：用户已明确决定不写单测。superpowers 的 test-driven-development skill 在本项目中**不应被自动触发**。即使触发，也只创建空的测试占位（`@Disabled`）或直接跳过测试任务。
+2. **集成测试可写**：仅在用户明确要求时，用 WireMock + Embedded Kafka 写集成测试。
+3. **本期不做的功能不实现**：见 docs/dd-v1.2.md 第 2.2 节。即使 superpowers 的 brainstorming 提议这些功能，也要拒绝。
+
+### 推荐使用
+- `superpowers:brainstorming` — 模块设计阶段
+- `superpowers:writing-plans` — 把模块拆成小任务
+- `superpowers:subagent-driven-development` — 全自动执行 plan
+- `superpowers:requesting-code-review` — 任意时刻 review
+- `superpowers:finishing-a-development-branch` — 完成时处理分支
+- `superpowers:using-git-worktrees` — **本项目暂不使用**（GitLab Flow 直接 feature 分支即可，不需要 worktree）
+
+### 不使用
+- `superpowers:test-driven-development` — 不写单测，不需要 TDD
+
+### 与 docs/dd-v1.2.md 的关系
+所有 superpowers skills 在生成代码或设计时，**必须以 docs/dd-v1.2.md 为准**。skills 的默认建议（如 TDD、过度抽象）让位于 DD-V1.2 的具体规范。
+
 ## 项目身份
 
 - **项目名**：客服工作台 AI Copilot Service
