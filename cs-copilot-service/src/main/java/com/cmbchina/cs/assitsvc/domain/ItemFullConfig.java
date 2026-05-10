@@ -9,6 +9,10 @@ import java.util.List;
 
 /**
  * 功能完整配置，对应 CLOB copilotIndex.itemById 中的单条记录。
+ *
+ * <p>字段优先级说明：{@link #riskLevel}、{@link #targetKind}、{@link #openMode} 与
+ * {@link #copilotExt} 中的同名字段存在重叠（反映存量表与扩展表的双重来源）。
+ * 运行时以 {@code copilotExt} 中的值为准，本类冗余字段仅供快速索引使用。
  */
 @Data
 @Builder

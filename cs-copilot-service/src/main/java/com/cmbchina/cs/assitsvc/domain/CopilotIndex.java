@@ -20,6 +20,6 @@ public class CopilotIndex {
     /** 意图代码 → 候选功能引用列表（含优先级），key 为 intentCode */
     private Map<String, List<ItemReference>> intentToItems;
 
-    /** 功能 ID → 完整配置，key 为 itemId */
-    private Map<Long, ItemFullConfig> itemById;
+    /** 功能 ID → 完整配置，key 为 String.valueOf(itemId)（JSON key 必须为字符串） */
+    private Map<String, ItemFullConfig> itemById;
 }

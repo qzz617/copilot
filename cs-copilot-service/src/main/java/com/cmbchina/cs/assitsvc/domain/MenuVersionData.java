@@ -5,6 +5,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import com.alibaba.fastjson2.JSONObject;
+
 import java.util.List;
 
 /**
@@ -22,8 +24,8 @@ public class MenuVersionData {
     /** CLOB 生成时间，ISO 8601 格式 */
     private String configBuildTime;
 
-    /** 存量菜单树（groups → modules → items），Copilot 只读 copilotIndex */
-    private List<Object> groups;
+    /** 存量菜单树（groups → modules → items），Copilot 侧不解析，保持 JSONObject 原始形态 */
+    private List<JSONObject> groups;
 
     /** Copilot 反向索引，由发布时计算生成 */
     private CopilotIndex copilotIndex;
