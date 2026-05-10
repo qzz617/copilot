@@ -147,6 +147,11 @@ copilot:
   config-refresh:
     polling-interval-ms: 30000
 
+  # ============= M03 对话历史管理 =============
+  history:
+    max-size: 50
+    ttl-hours: 1
+
 # ============= 日志配置 =============
 logging:
   level:
