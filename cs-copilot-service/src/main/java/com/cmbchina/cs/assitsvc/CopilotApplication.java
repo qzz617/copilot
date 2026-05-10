@@ -1,9 +1,7 @@
 package com.cmbchina.cs.assitsvc;
 
-import com.cmbchina.cs.assitsvc.asr.config.HistoryProperties;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.cloud.openfeign.EnableFeignClients;
 import org.springframework.kafka.annotation.EnableKafka;
 import org.springframework.scheduling.annotation.EnableScheduling;
@@ -25,7 +23,6 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @EnableFeignClients(basePackages = "com.cmbchina.cs.assitsvc.infra.feign")
 @EnableKafka
 @EnableScheduling
-@EnableConfigurationProperties(HistoryProperties.class)
 public class CopilotApplication {
 
     public static void main(String[] args) {

@@ -133,7 +133,6 @@ copilot:
   # 单通话限制（DD-V1.2 P1-4）
   call-limits:
     max-ai-calls: 50
-    max-history-size: 50
     intent-cooldown-sec: 60
 
   # 灰度白名单（DD-V1.2 P1-9，最简方案）

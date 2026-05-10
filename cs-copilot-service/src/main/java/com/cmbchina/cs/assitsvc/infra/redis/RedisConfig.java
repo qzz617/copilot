@@ -1,6 +1,7 @@
 package com.cmbchina.cs.assitsvc.infra.redis;
 
 import org.springframework.boot.autoconfigure.data.redis.RedisProperties;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.util.StringUtils;
@@ -12,6 +13,7 @@ import redis.clients.jedis.JedisPoolConfig;
  * 显式声明 JedisPool bean，供需要 Pipeline 的组件直接注入。
  */
 @Configuration
+@EnableConfigurationProperties(HistoryProperties.class)
 public class RedisConfig {
 
     @Bean

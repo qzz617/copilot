@@ -1,4 +1,4 @@
-package com.cmbchina.cs.assitsvc.asr.config;
+package com.cmbchina.cs.assitsvc.infra.redis;
 
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
