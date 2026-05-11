@@ -7,6 +7,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.JedisPool;
+import redis.clients.jedis.Transaction;
 import redis.clients.jedis.exceptions.JedisException;
 
 import java.util.HashMap;
@@ -52,8 +53,10 @@ public class CallSessionManagerImpl implements CallSessionManager {
 
         String key = key(session.getCallId());
         try (Jedis jedis = jedisPool.getResource()) {
-            jedis.hmset(key, fields);
-            jedis.expire(key, SESSION_TTL_SECONDS);
+            Transaction tx = jedis.multi();
+            tx.hmset(key, fields);
+            tx.expire(key, SESSION_TTL_SECONDS);
+            tx.exec();
         } catch (JedisException e) {
             log.warn("[M04] Redis bind call session failed, callId={}, operatorId={}",
                     session.getCallId(), session.getOperatorId(), e);

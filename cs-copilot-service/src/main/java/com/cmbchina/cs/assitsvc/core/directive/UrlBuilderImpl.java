@@ -2,7 +2,7 @@ package com.cmbchina.cs.assitsvc.core.directive;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
@@ -24,14 +24,12 @@ import java.util.Map;
 public class UrlBuilderImpl implements UrlBuilder {
 
     private final UrlSecurityProperties props;
-
-    @Value("${spring.profiles.active:dev}")
-    private String activeProfile;
+    private final Environment environment;
 
     @Override
     public String buildUrl(String baseUrl, Map<String, String> params) {
         URI uri = parseAndValidate(baseUrl);
-        LinkedHashMap<String, String> existingParams = parseRawQuery(uri.getRawQuery());
+        LinkedHashMap<String, QueryParam> existingParams = parseRawQuery(uri.getRawQuery());
         LinkedHashMap<String, String> validParams = filterValidParams(params);
 
         if (validParams.isEmpty()) {
@@ -61,13 +59,17 @@ public class UrlBuilderImpl implements UrlBuilder {
         if (!StringUtils.hasText(domain) || !props.getUrlWhitelist().contains(domain)) {
             throw new UrlValidationException("Domain not in whitelist: " + domain);
         }
-        if ("prod".equalsIgnoreCase(activeProfile) && props.getUrlBuilder().getUatDomains().contains(domain)) {
+        if (uri.getPort() != -1 && uri.getPort() != 443) {
+            throw new UrlValidationException("Only default https port allowed: " + uri.getPort());
+        }
+        if (isProdProfile() && props.getUrlBuilder().getUatDomains().contains(domain)) {
             throw new UrlValidationException("UAT domain not allowed in PROD: " + domain);
         }
         return uri;
     }
 
-    private void mergeParams(LinkedHashMap<String, String> existingParams, LinkedHashMap<String, String> validParams) {
+    private void mergeParams(LinkedHashMap<String, QueryParam> existingParams,
+                             LinkedHashMap<String, String> validParams) {
         String policy = props.getUrlBuilder().getSameKeyPolicy();
         String normalizedPolicy = StringUtils.hasText(policy) ? policy.trim().toUpperCase() : "OVERRIDE";
 
@@ -93,7 +95,9 @@ public class UrlBuilderImpl implements UrlBuilder {
             throw new UrlValidationException("Unknown same-key-policy: " + policy);
         }
 
-        existingParams.putAll(validParams);
+        for (Map.Entry<String, String> entry : validParams.entrySet()) {
+            existingParams.put(entry.getKey(), QueryParam.newParam(entry.getKey(), entry.getValue()));
+        }
     }
 
     private static LinkedHashMap<String, String> filterValidParams(Map<String, String> params) {
@@ -110,8 +114,8 @@ public class UrlBuilderImpl implements UrlBuilder {
         return result;
     }
 
-    private static LinkedHashMap<String, String> parseRawQuery(String rawQuery) {
-        LinkedHashMap<String, String> result = new LinkedHashMap<>();
+    private static LinkedHashMap<String, QueryParam> parseRawQuery(String rawQuery) {
+        LinkedHashMap<String, QueryParam> result = new LinkedHashMap<>();
         if (!StringUtils.hasText(rawQuery)) {
             return result;
         }
@@ -123,13 +127,13 @@ public class UrlBuilderImpl implements UrlBuilder {
             }
             int index = pair.indexOf('=');
             String rawKey = index >= 0 ? pair.substring(0, index) : pair;
-            String rawValue = index >= 0 ? pair.substring(index + 1) : "";
-            result.put(decode(rawKey), decode(rawValue));
+            String key = decode(rawKey);
+            result.put(key, QueryParam.rawParam(key, pair));
         }
         return result;
     }
 
-    private static String rebuildUrl(URI uri, LinkedHashMap<String, String> params) {
+    private static String rebuildUrl(URI uri, LinkedHashMap<String, QueryParam> params) {
         StringBuilder sb = new StringBuilder();
         sb.append(uri.getScheme()).append("://").append(uri.getRawAuthority());
         if (uri.getRawPath() != null) {
@@ -138,11 +142,11 @@ public class UrlBuilderImpl implements UrlBuilder {
         if (!params.isEmpty()) {
             sb.append("?");
             boolean first = true;
-            for (Map.Entry<String, String> entry : params.entrySet()) {
+            for (QueryParam param : params.values()) {
                 if (!first) {
                     sb.append("&");
                 }
-                sb.append(encode(entry.getKey())).append("=").append(encodeValue(entry.getValue()));
+                sb.append(param.toRawPair());
                 first = false;
             }
         }
@@ -150,6 +154,15 @@ public class UrlBuilderImpl implements UrlBuilder {
             sb.append("#").append(uri.getRawFragment());
         }
         return sb.toString();
+    }
+
+    private boolean isProdProfile() {
+        for (String profile : environment.getActiveProfiles()) {
+            if ("prod".equalsIgnoreCase(profile)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static String encodeValue(String value) {
@@ -172,6 +185,33 @@ public class UrlBuilderImpl implements UrlBuilder {
             return URLDecoder.decode(value == null ? "" : value, "UTF-8");
         } catch (UnsupportedEncodingException e) {
             throw new UrlValidationException("UTF-8 encoding unavailable", e);
+        }
+    }
+
+    private static class QueryParam {
+        private final String key;
+        private final String value;
+        private final String rawPair;
+
+        private QueryParam(String key, String value, String rawPair) {
+            this.key = key;
+            this.value = value;
+            this.rawPair = rawPair;
+        }
+
+        private static QueryParam rawParam(String key, String rawPair) {
+            return new QueryParam(key, null, rawPair);
+        }
+
+        private static QueryParam newParam(String key, String value) {
+            return new QueryParam(key, value, null);
+        }
+
+        private String toRawPair() {
+            if (rawPair != null) {
+                return rawPair;
+            }
+            return encode(key) + "=" + encodeValue(value);
         }
     }
 }

@@ -30,9 +30,7 @@ public class IntentTreeLoaderImpl implements IntentTreeLoader {
     @Value("${copilot.intent-tree.version}")
     private String version;
 
-    private volatile IntentTreeNode cachedTree;
-    private volatile int nodeCount;
-    private volatile Instant lastLoadTime;
+    private volatile IntentTreeSnapshot snapshot = new IntentTreeSnapshot(null, 0, null);
 
     /**
      * 启动时加载 classpath 中的意图树配置。
@@ -48,9 +46,7 @@ public class IntentTreeLoaderImpl implements IntentTreeLoader {
         int newNodeCount = countNodes(newTree);
         Instant newLoadTime = Instant.now();
 
-        this.cachedTree = newTree;
-        this.nodeCount = newNodeCount;
-        this.lastLoadTime = newLoadTime;
+        this.snapshot = new IntentTreeSnapshot(newTree, newNodeCount, newLoadTime);
 
         log.info("[M05] Intent tree loaded, version={}, nodeCount={}, loadTime={}",
                 version, newNodeCount, newLoadTime);
@@ -58,7 +54,7 @@ public class IntentTreeLoaderImpl implements IntentTreeLoader {
 
     @Override
     public IntentTreeNode getTree() {
-        return cachedTree;
+        return snapshot.getTree();
     }
 
     @Override
@@ -68,12 +64,12 @@ public class IntentTreeLoaderImpl implements IntentTreeLoader {
 
     @Override
     public int getNodeCount() {
-        return nodeCount;
+        return snapshot.getNodeCount();
     }
 
     @Override
     public Instant getLastLoadTime() {
-        return lastLoadTime;
+        return snapshot.getLastLoadTime();
     }
 
     private IntentTreeNode loadTree() {
@@ -116,5 +112,29 @@ public class IntentTreeLoaderImpl implements IntentTreeLoader {
             count += countNodes(child);
         }
         return count;
+    }
+
+    private static class IntentTreeSnapshot {
+        private final IntentTreeNode tree;
+        private final int nodeCount;
+        private final Instant lastLoadTime;
+
+        private IntentTreeSnapshot(IntentTreeNode tree, int nodeCount, Instant lastLoadTime) {
+            this.tree = tree;
+            this.nodeCount = nodeCount;
+            this.lastLoadTime = lastLoadTime;
+        }
+
+        private IntentTreeNode getTree() {
+            return tree;
+        }
+
+        private int getNodeCount() {
+            return nodeCount;
+        }
+
+        private Instant getLastLoadTime() {
+            return lastLoadTime;
+        }
     }
 }

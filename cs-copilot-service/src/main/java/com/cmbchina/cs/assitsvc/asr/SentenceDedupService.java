@@ -7,6 +7,7 @@ import org.springframework.util.StringUtils;
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.JedisPool;
 import redis.clients.jedis.exceptions.JedisException;
+import redis.clients.jedis.params.SetParams;
 
 /**
  * ASR sentenceId 去重服务。
@@ -36,9 +37,8 @@ public class SentenceDedupService {
 
         String key = KEY_PREFIX + sentenceId;
         try (Jedis jedis = jedisPool.getResource()) {
-            Long inserted = jedis.setnx(key, "1");
-            if (inserted != null && inserted == 1L) {
-                jedis.expire(key, dedupTtlSeconds());
+            String result = jedis.set(key, "1", new SetParams().nx().ex(dedupTtlSeconds()));
+            if ("OK".equals(result)) {
                 return false;
             }
             return true;

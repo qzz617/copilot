@@ -227,6 +227,9 @@ CREATE INDEX idx_feedback_log_call
     ON svccfg.cs_copilot_feedback_log(call_id);
 CREATE INDEX idx_feedback_log_effective
     ON svccfg.cs_copilot_feedback_log(directive_id, is_effective);
+CREATE UNIQUE INDEX uq_feedback_log_effective_directive
+    ON svccfg.cs_copilot_feedback_log(directive_id)
+    WHERE is_effective = 'Y';
 
 COMMENT ON TABLE svccfg.cs_copilot_feedback_log IS 'Copilot 反馈日志';
 

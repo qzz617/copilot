@@ -24,6 +24,9 @@ import java.util.concurrent.atomic.AtomicLong;
 @RequiredArgsConstructor
 public class SentenceMerger {
 
+    private static final int LOCK_STRIPE_COUNT = 256;
+    private static final Object[] LOCK_STRIPES = createLockStripes();
+
     private final Map<String, ScheduledFuture<?>> debounceTimers = new ConcurrentHashMap<>();
     private final Map<String, ScheduledFuture<?>> silenceTimers = new ConcurrentHashMap<>();
     private final Map<String, Long> activeRounds = new ConcurrentHashMap<>();
@@ -53,14 +56,16 @@ public class SentenceMerger {
         long silenceMs = Math.max(0L, props.getSilenceMs());
         long roundId = roundSequence.incrementAndGet();
 
-        activeRounds.put(callId, roundId);
-        cancelTimer(debounceTimers.remove(callId));
-        cancelTimer(silenceTimers.remove(callId));
+        synchronized (lockFor(callId)) {
+            activeRounds.put(callId, roundId);
+            cancelTimer(debounceTimers.remove(callId));
+            cancelTimer(silenceTimers.remove(callId));
 
-        debounceTimers.put(callId, scheduler.schedule(
-                new TriggerTask(callId, roundId, "DEBOUNCE"), debounceMs, TimeUnit.MILLISECONDS));
-        silenceTimers.put(callId, scheduler.schedule(
-                new TriggerTask(callId, roundId, "SILENCE"), silenceMs, TimeUnit.MILLISECONDS));
+            debounceTimers.put(callId, scheduler.schedule(
+                    new TriggerTask(callId, roundId, "DEBOUNCE"), debounceMs, TimeUnit.MILLISECONDS));
+            silenceTimers.put(callId, scheduler.schedule(
+                    new TriggerTask(callId, roundId, "SILENCE"), silenceMs, TimeUnit.MILLISECONDS));
+        }
 
         log.debug("[M02] Sentence timer reset, callId={}, continuity={}, debounceMs={}, silenceMs={}",
                 callId, continuity, debounceMs, silenceMs);
@@ -76,18 +81,22 @@ public class SentenceMerger {
             throw new IllegalArgumentException("callId must not be null or empty");
         }
 
-        activeRounds.remove(callId);
-        cancelTimer(debounceTimers.remove(callId));
-        cancelTimer(silenceTimers.remove(callId));
+        synchronized (lockFor(callId)) {
+            activeRounds.remove(callId);
+            cancelTimer(debounceTimers.remove(callId));
+            cancelTimer(silenceTimers.remove(callId));
+        }
     }
 
     private void triggerIfCurrent(String callId, long roundId, String source) {
-        if (!activeRounds.remove(callId, roundId)) {
-            return;
-        }
+        synchronized (lockFor(callId)) {
+            if (!activeRounds.remove(callId, roundId)) {
+                return;
+            }
 
-        cancelTimer(debounceTimers.remove(callId));
-        cancelTimer(silenceTimers.remove(callId));
+            cancelTimer(debounceTimers.remove(callId));
+            cancelTimer(silenceTimers.remove(callId));
+        }
 
         try {
             log.debug("[M02] Intent recognition triggered, callId={}, source={}", callId, source);
@@ -111,6 +120,19 @@ public class SentenceMerger {
         if (future != null && !future.isDone()) {
             future.cancel(false);
         }
+    }
+
+    private static Object lockFor(String callId) {
+        int index = (callId.hashCode() & Integer.MAX_VALUE) % LOCK_STRIPE_COUNT;
+        return LOCK_STRIPES[index];
+    }
+
+    private static Object[] createLockStripes() {
+        Object[] locks = new Object[LOCK_STRIPE_COUNT];
+        for (int i = 0; i < locks.length; i++) {
+            locks[i] = new Object();
+        }
+        return locks;
     }
 
     private class TriggerTask implements Runnable {

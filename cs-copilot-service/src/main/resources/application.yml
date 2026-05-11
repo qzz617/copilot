@@ -38,7 +38,7 @@ spring:
   datasource:
     url: ${DATASOURCE_URL:jdbc:postgresql://localhost:5432/cccs}
     username: ${DATASOURCE_USERNAME:cccs}
-    password: ${DATASOURCE_PASSWORD:cccs}
+    password: ${DATASOURCE_PASSWORD}
     driver-class-name: org.postgresql.Driver
     hikari:
       maximum-pool-size: 10
@@ -141,6 +141,10 @@ copilot:
     max-ai-calls: 50
     intent-cooldown-sec: 60
 
+  # 指令有效期
+  directive:
+    expire-seconds: 30
+
   # 灰度白名单（DD-V1.2 P1-9，最简方案）
   gray:
     enabled: true
@@ -148,14 +152,26 @@ copilot:
     operator-whitelist:
       - ho212121
 
+  # 管理接口鉴权
+  admin:
+    auth:
+      enabled: true
+      header-name: X-Copilot-Admin-Token
+      token: ${COPILOT_ADMIN_TOKEN:}
+
+  # WebSocket Origin 白名单
+  websocket:
+    allowed-origin-patterns:
+      - https://frdctrfront.paas.cmbchina.cn
+      - https://mccusweb.paas.cmbchina.cn
+      - https://cccsweb.paas.cmbchina.cn
+      - https://frdctrfront.paasuat.cmbchina.cn
+      - https://mccusweb.paasuat.cmbchina.cn
+
   # 多 Pod 配置一致性轮询（DD-V1.2 P1-17）
   config-refresh:
     polling-interval-ms: 30000
-
-  # CLOB 配置读取（字段名按存量 cs_menu_version 实际结构可覆盖）
-  config:
-    latest-clob-sql: SELECT config_data FROM svccfg.cs_menu_version ORDER BY created_time DESC LIMIT 1
-    latest-version-sql: SELECT version FROM svccfg.cs_menu_version ORDER BY created_time DESC LIMIT 1
+    lock-ttl-seconds: 30
 
   # ============= M03 对话历史管理 =============
   history:

@@ -93,7 +93,7 @@ public class JsonRuleEvaluatorImpl implements RuleEvaluator {
             return actualValue == null;
         }
         if ("gt".equals(op) || "gte".equals(op) || "lt".equals(op) || "lte".equals(op)) {
-            return compare(op, actualValue, expectedValue);
+            return compare(item.getField(), op, actualValue, expectedValue);
         }
 
         throw new IllegalArgumentException("Unknown condition op: " + op);
@@ -168,9 +168,12 @@ public class JsonRuleEvaluatorImpl implements RuleEvaluator {
         return false;
     }
 
-    private static boolean compare(String op, Object actualValue, Object expectedValue) {
-        BigDecimal actual = toBigDecimal(actualValue);
-        BigDecimal expected = toBigDecimal(expectedValue);
+    private boolean compare(String field, String op, Object actualValue, Object expectedValue) {
+        BigDecimal actual = toBigDecimal(field, op, "actual", actualValue);
+        BigDecimal expected = toBigDecimal(field, op, "expected", expectedValue);
+        if (actual == null || expected == null) {
+            return false;
+        }
         int compared = actual.compareTo(expected);
         if ("gt".equals(op)) {
             return compared > 0;
@@ -184,11 +187,17 @@ public class JsonRuleEvaluatorImpl implements RuleEvaluator {
         return compared <= 0;
     }
 
-    private static BigDecimal toBigDecimal(Object value) {
+    private BigDecimal toBigDecimal(String field, String op, String side, Object value) {
         if (value == null) {
-            throw new IllegalArgumentException("Cannot compare null value");
+            log.warn("[M07] Numeric condition {} value missing, field={}, op={}", side, field, op);
+            return null;
         }
-        return new BigDecimal(String.valueOf(value));
+        try {
+            return new BigDecimal(String.valueOf(value));
+        } catch (NumberFormatException e) {
+            log.warn("[M07] Numeric condition {} value invalid, field={}, op={}", side, field, op);
+            return null;
+        }
     }
 
     private static String toComparableString(Object value) {

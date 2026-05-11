@@ -61,6 +61,20 @@ public class JdbcTriggerLogDao implements TriggerLogDao {
                 status, directiveId);
     }
 
+    @Override
+    public boolean markDirectiveConsumedIfOpen(String directiveId) {
+        if (!StringUtils.hasText(directiveId)) {
+            return false;
+        }
+        int updated = jdbcTemplate.update(
+                "UPDATE svccfg.cs_copilot_trigger_log SET directive_status = 'CONSUMED' "
+                        + "WHERE directive_id = ? "
+                        + "AND (directive_status IS NULL OR directive_status <> 'CONSUMED') "
+                        + "AND (expire_at IS NULL OR expire_at >= CURRENT_TIMESTAMP)",
+                directiveId);
+        return updated > 0;
+    }
+
     private TriggerLogRecord mapRecord(ResultSet rs, int rowNum) throws SQLException {
         return TriggerLogRecord.builder()
                 .logId(rs.getString("log_id"))

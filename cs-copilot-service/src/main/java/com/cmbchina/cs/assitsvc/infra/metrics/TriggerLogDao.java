@@ -10,4 +10,6 @@ public interface TriggerLogDao {
     TriggerLogRecord findByDirectiveId(String directiveId);
 
     void updateDirectiveStatus(String directiveId, String status);
+
+    boolean markDirectiveConsumedIfOpen(String directiveId);
 }

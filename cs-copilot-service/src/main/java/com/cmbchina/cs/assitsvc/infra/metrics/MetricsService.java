@@ -106,13 +106,14 @@ public class MetricsService {
         return UUID.randomUUID().toString().replace("-", "");
     }
 
-    private static Instant parseInstant(String value) {
+    private Instant parseInstant(String value) {
         if (value == null || value.trim().isEmpty()) {
             return Instant.now();
         }
         try {
             return Instant.parse(value);
         } catch (Exception e) {
+            log.warn("[M16] Parse instant failed, fallback to now");
             return Instant.now();
         }
     }

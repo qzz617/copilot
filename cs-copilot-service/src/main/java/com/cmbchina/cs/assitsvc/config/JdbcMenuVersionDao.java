@@ -2,7 +2,6 @@ package com.cmbchina.cs.assitsvc.config;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -17,24 +16,21 @@ import java.sql.SQLException;
 @RequiredArgsConstructor
 public class JdbcMenuVersionDao implements MenuVersionDao {
 
+    private static final String LATEST_CLOB_SQL =
+            "SELECT config_data FROM svccfg.cs_menu_version ORDER BY created_time DESC LIMIT 1";
+    private static final String LATEST_VERSION_SQL =
+            "SELECT version FROM svccfg.cs_menu_version ORDER BY created_time DESC LIMIT 1";
+
     private final JdbcTemplate jdbcTemplate;
-
-    @Value("${copilot.config.latest-clob-sql:"
-            + "SELECT config_data FROM svccfg.cs_menu_version ORDER BY created_time DESC LIMIT 1}")
-    private String latestClobSql;
-
-    @Value("${copilot.config.latest-version-sql:"
-            + "SELECT version FROM svccfg.cs_menu_version ORDER BY created_time DESC LIMIT 1}")
-    private String latestVersionSql;
 
     @Override
     public String fetchLatestActiveVersion() {
-        return jdbcTemplate.query(latestClobSql, this::extractFirstString);
+        return jdbcTemplate.query(LATEST_CLOB_SQL, this::extractFirstString);
     }
 
     @Override
     public String fetchLatestVersionMarker() {
-        return jdbcTemplate.query(latestVersionSql, this::extractFirstString);
+        return jdbcTemplate.query(LATEST_VERSION_SQL, this::extractFirstString);
     }
 
     private String extractFirstString(ResultSet rs) throws SQLException {

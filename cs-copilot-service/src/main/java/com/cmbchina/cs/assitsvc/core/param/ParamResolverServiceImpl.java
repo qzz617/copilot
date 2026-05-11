@@ -7,6 +7,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import java.lang.reflect.Array;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -87,15 +88,47 @@ public class ParamResolverServiceImpl implements ParamResolverService {
         }
 
         Object current = source;
-        String normalizedPath = path.replace("[0]", ".0");
+        String normalizedPath = path.replaceAll("\\[(\\d+)\\]", ".$1");
         String[] parts = normalizedPath.split("\\.");
         for (String part : parts) {
-            if (!(current instanceof Map)) {
+            if (current instanceof Map) {
+                current = ((Map<?, ?>) current).get(part);
+            } else if (current instanceof List) {
+                current = getListValue((List<?>) current, part);
+            } else if (current != null && current.getClass().isArray()) {
+                current = getArrayValue(current, part);
+            } else {
+                current = null;
+            }
+            if (current == null) {
                 return null;
             }
-            current = ((Map<?, ?>) current).get(part);
         }
         return current;
+    }
+
+    private static Object getListValue(List<?> list, String indexText) {
+        Integer index = parseIndex(indexText);
+        if (index == null || index < 0 || index >= list.size()) {
+            return null;
+        }
+        return list.get(index);
+    }
+
+    private static Object getArrayValue(Object array, String indexText) {
+        Integer index = parseIndex(indexText);
+        if (index == null || index < 0 || index >= Array.getLength(array)) {
+            return null;
+        }
+        return Array.get(array, index);
+    }
+
+    private static Integer parseIndex(String indexText) {
+        try {
+            return Integer.valueOf(indexText);
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     private static String toStringValue(Object value) {

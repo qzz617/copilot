@@ -10,6 +10,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import javax.validation.Valid;
+
 /**
  * Copilot 反馈接口。
  */
@@ -27,7 +29,7 @@ public class FeedbackController {
      * @return 处理结果
      */
     @PostMapping("/feedback")
-    public ApiResult feedback(@RequestBody FeedbackRequest request) {
+    public ApiResult feedback(@Valid @RequestBody FeedbackRequest request) {
         FeedbackResult result = feedbackService.handleFeedback(request);
         if (result.isSuccess()) {
             return ApiResult.builder().code("0000").message(result.getMessage()).build();

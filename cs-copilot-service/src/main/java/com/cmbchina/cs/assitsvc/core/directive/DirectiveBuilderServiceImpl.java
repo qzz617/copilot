@@ -13,11 +13,11 @@ import com.cmbchina.cs.assitsvc.domain.IntentResult;
 import com.cmbchina.cs.assitsvc.domain.ItemFullConfig;
 import com.cmbchina.cs.assitsvc.domain.RiskInfo;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.time.Instant;
-import java.time.temporal.ChronoUnit;
 import java.util.Map;
 import java.util.UUID;
 
@@ -30,6 +30,9 @@ public class DirectiveBuilderServiceImpl implements DirectiveBuilderService {
 
     private final ParamResolverService paramResolverService;
     private final UrlBuilder urlBuilder;
+
+    @Value("${copilot.directive.expire-seconds:30}")
+    private int directiveExpireSeconds;
 
     @Override
     public DirectiveDTO build(BuildContext context, IntentResult intentResult) {
@@ -57,7 +60,7 @@ public class DirectiveBuilderServiceImpl implements DirectiveBuilderService {
                 .callId(context.getCallId())
                 .operatorId(context.getOperatorId())
                 .configVersion(context.getConfigVersion())
-                .expireAt(Instant.now().plus(30, ChronoUnit.SECONDS).toString())
+                .expireAt(Instant.now().plusSeconds(Math.max(1, directiveExpireSeconds)).toString())
                 .intent(buildIntent(intentResult))
                 .function(buildFunction(item, ext))
                 .display(buildDisplay(intentResult, ext))

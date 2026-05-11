@@ -44,7 +44,8 @@ public class FeedbackServiceImpl implements FeedbackService {
         }
 
         boolean alreadyEffective = feedbackLogDao.existsEffective(request.getDirectiveId());
-        boolean effective = !alreadyEffective;
+        boolean effective = !alreadyEffective
+                && triggerLogDao.markDirectiveConsumedIfOpen(request.getDirectiveId());
         metricsService.recordFeedback(request, triggerLog, effective);
 
         if (!effective) {
@@ -52,7 +53,6 @@ public class FeedbackServiceImpl implements FeedbackService {
         }
 
         applyEffectiveFeedback(request);
-        triggerLogDao.updateDirectiveStatus(request.getDirectiveId(), "CONSUMED");
         return FeedbackResult.success("EFFECTIVE");
     }
 

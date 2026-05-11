@@ -19,6 +19,7 @@ import redis.clients.jedis.JedisPool;
 import redis.clients.jedis.exceptions.JedisException;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 
@@ -32,6 +33,10 @@ public class IntentRecognitionServiceImpl implements IntentRecognitionService {
 
     private static final String AI_COUNT_KEY_PREFIX = "copilot:ai_count:";
     private static final int AI_COUNT_TTL_SECONDS = 2 * 3600;
+    private static final String AI_COUNT_SCRIPT =
+            "local count = redis.call('INCR', KEYS[1]); "
+                    + "if count == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]); end; "
+                    + "return count;";
 
     private final AiIntentFeignClient feignClient;
     private final DialogHistoryManager historyManager;
@@ -135,15 +140,25 @@ public class IntentRecognitionServiceImpl implements IntentRecognitionService {
     private boolean allowAiCall(String callId) {
         String key = AI_COUNT_KEY_PREFIX + callId;
         try (Jedis jedis = jedisPool.getResource()) {
-            Long count = jedis.incr(key);
-            if (count != null && count == 1L) {
-                jedis.expire(key, AI_COUNT_TTL_SECONDS);
-            }
+            Object result = jedis.eval(AI_COUNT_SCRIPT,
+                    Collections.singletonList(key),
+                    Collections.singletonList(String.valueOf(AI_COUNT_TTL_SECONDS)));
+            Long count = toLong(result);
             return count == null || count <= maxAiCalls;
         } catch (JedisException e) {
             log.warn("[M06] Redis AI call count failed, callId={}", callId, e);
             return true;
         }
+    }
+
+    private static Long toLong(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof Number) {
+            return ((Number) value).longValue();
+        }
+        return Long.valueOf(String.valueOf(value));
     }
 
     private static String generateRequestId() {

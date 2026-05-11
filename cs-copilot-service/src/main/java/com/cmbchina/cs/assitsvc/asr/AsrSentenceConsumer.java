@@ -33,7 +33,7 @@ public class AsrSentenceConsumer {
      */
     @KafkaListener(topics = "${copilot.asr.topic}", concurrency = "${copilot.asr.concurrency:4}")
     public void consume(ConsumerRecord<String, String> record, Acknowledgment ack) {
-        String payload = record == null ? null : record.value();
+        String payload = record.value();
         try {
             process(payload);
         } catch (Exception e) {

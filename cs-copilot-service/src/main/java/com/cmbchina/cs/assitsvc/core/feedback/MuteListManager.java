@@ -6,6 +6,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.JedisPool;
+import redis.clients.jedis.Transaction;
 import redis.clients.jedis.exceptions.JedisException;
 
 /**
@@ -49,8 +50,7 @@ public class MuteListManager {
             return;
         }
         try (Jedis jedis = jedisPool.getResource()) {
-            jedis.del(INTENT_KEY_PREFIX + callId);
-            jedis.del(ITEM_KEY_PREFIX + callId);
+            jedis.del(INTENT_KEY_PREFIX + callId, ITEM_KEY_PREFIX + callId);
         } catch (JedisException e) {
             log.warn("[M11] Redis cleanup mute list failed, callId={}", callId, e);
         }
@@ -61,8 +61,10 @@ public class MuteListManager {
             return;
         }
         try (Jedis jedis = jedisPool.getResource()) {
-            jedis.sadd(key, value);
-            jedis.expire(key, ttlSeconds);
+            Transaction tx = jedis.multi();
+            tx.sadd(key, value);
+            tx.expire(key, ttlSeconds);
+            tx.exec();
         } catch (JedisException e) {
             log.warn("[M11] Redis mute failed, key={}, value={}", key, value, e);
         }

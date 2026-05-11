@@ -9,11 +9,12 @@ import com.cmbchina.cs.assitsvc.core.intent.ExecutedStepsManager;
 import com.cmbchina.cs.assitsvc.domain.CallSession;
 import com.cmbchina.cs.assitsvc.session.CallSessionManager;
 import lombok.RequiredArgsConstructor;
-import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+
+import javax.validation.Valid;
 
 /**
  * 通话会话接口。
@@ -36,7 +37,7 @@ public class SessionController {
      * @return 处理结果
      */
     @PostMapping("/bind")
-    public ApiResult bind(@RequestBody CallSession session) {
+    public ApiResult bind(@Valid @RequestBody CallSession session) {
         callSessionManager.bind(session);
         return ApiResult.ok();
     }
@@ -48,10 +49,7 @@ public class SessionController {
      * @return 处理结果
      */
     @PostMapping("/unbind")
-    public ApiResult unbind(@RequestBody UnbindRequest request) {
-        if (request == null || !StringUtils.hasText(request.getCallId())) {
-            return ApiResult.fail("4000", "callId is required");
-        }
+    public ApiResult unbind(@Valid @RequestBody UnbindRequest request) {
         String callId = request.getCallId();
         callSessionManager.cleanup(callId);
         dialogHistoryManager.cleanup(callId);

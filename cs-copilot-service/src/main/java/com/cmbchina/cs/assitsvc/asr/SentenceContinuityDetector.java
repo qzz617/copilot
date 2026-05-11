@@ -4,6 +4,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
 import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -19,14 +20,13 @@ public class SentenceContinuityDetector {
             "账单", "卡片", "分期", "额度", "积分", "年费"
     );
 
-    private static final List<String> SUPPRESSOR_KEYWORDS = Arrays.asList(
+    private static final List<String> PAUSE_WORDS = Arrays.asList(
             "就是", "然后", "因为", "所以", "但是", "呃", "那个", "嗯", "就那个", "上个月", "那笔"
     );
 
-    private static final List<String> INCOMPLETE_SUFFIXES = Arrays.asList(
-            "就是", "然后", "因为", "所以", "但是", "呃", "那个",
-            "就", "嗯", "上个月", "那笔", "就那个"
-    );
+    private static final List<String> SUPPRESSOR_KEYWORDS = PAUSE_WORDS;
+
+    private static final List<String> INCOMPLETE_SUFFIXES = append(PAUSE_WORDS, "就");
 
     /**
      * 判断一句客户文本的连续性。
@@ -76,5 +76,11 @@ public class SentenceContinuityDetector {
             }
         }
         return false;
+    }
+
+    private static List<String> append(List<String> values, String extraValue) {
+        List<String> result = new ArrayList<>(values);
+        result.add(extraValue);
+        return result;
     }
 }
