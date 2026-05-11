@@ -55,7 +55,7 @@ public class DialogHistoryManagerImpl implements DialogHistoryManager {
             pipeline.rpush(key, json);
             // 保留尾部最新的 maxSize 条，超出时裁剪头部旧数据
             pipeline.ltrim(key, -props.getMaxSize(), -1);
-            pipeline.expire(key, (long) props.getTtlHours() * 3600);
+            pipeline.expire(key, props.getTtlHours() * 3600);
             pipeline.sync();
         } catch (JedisException e) {
             log.warn("[M03] Redis append failed, callId={}", callId, e);
