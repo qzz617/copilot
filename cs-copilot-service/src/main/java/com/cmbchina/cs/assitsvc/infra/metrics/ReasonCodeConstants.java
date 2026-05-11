@@ -1,0 +1,25 @@
+package com.cmbchina.cs.assitsvc.infra.metrics;
+
+/**
+ * Copilot 业务原因码常量。
+ */
+public final class ReasonCodeConstants {
+
+    public static final String AI_TIMEOUT = "AI_TIMEOUT";
+    public static final String AI_FAILED = "AI_FAILED";
+    public static final String AI_CIRCUIT_BREAKER_OPEN = "AI_CIRCUIT_BREAKER_OPEN";
+    public static final String INTENT_EMPTY = "INTENT_EMPTY";
+    public static final String INTENT_NOT_MAPPED = "INTENT_NOT_MAPPED";
+    public static final String RISK_DISABLED = "RISK_DISABLED";
+    public static final String URL_NOT_ALLOWED = "URL_NOT_ALLOWED";
+    public static final String COOKIE_NOT_ALLOWED = "COOKIE_NOT_ALLOWED";
+    public static final String PARAM_MISSING = "PARAM_MISSING";
+    public static final String SESSION_BIND_MISSING = "SESSION_BIND_MISSING";
+    public static final String GRAY_FILTERED = "GRAY_FILTERED";
+    public static final String MUTED_BY_AGENT = "MUTED_BY_AGENT";
+    public static final String AI_CALL_LIMIT_EXCEEDED = "AI_CALL_LIMIT_EXCEEDED";
+    public static final String PUSH_FAILED = "PUSH_FAILED";
+
+    private ReasonCodeConstants() {
+    }
+}

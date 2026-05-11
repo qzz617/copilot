@@ -78,10 +78,12 @@ copilot:
   # ASR 接入
   asr:
     topic: cs.asr.sentences
+    concurrency: 4
     min-text-length: 4
     asr-confidence-threshold: 0.65
     # confidence 缺失策略：true=允许通过，false=拒绝
     asr-confidence-default-pass: true
+    dedup-ttl-hours: 2
 
   # 防抖参数
   debounce:
@@ -106,6 +108,8 @@ copilot:
     - frdctrfront.paas.cmbchina.cn
     - mccusweb.paas.cmbchina.cn
     - cccsweb.paas.cmbchina.cn
+    - frdctrfront.paasuat.cmbchina.cn
+    - mccusweb.paasuat.cmbchina.cn
 
   # URL Builder 配置（DD-V1.2 P0-5）
   url-builder:
@@ -126,6 +130,8 @@ copilot:
     domain-bindings:
       frdctrfront.paas.cmbchina.cn:
         - workbenchSession
+      frdctrfront.paasuat.cmbchina.cn:
+        - workbenchSession
     # 必填 Cookie（缺失时阻断打开，不保留占位符）
     required-cookies:
       - workbenchSession
@@ -145,6 +151,11 @@ copilot:
   # 多 Pod 配置一致性轮询（DD-V1.2 P1-17）
   config-refresh:
     polling-interval-ms: 30000
+
+  # CLOB 配置读取（字段名按存量 cs_menu_version 实际结构可覆盖）
+  config:
+    latest-clob-sql: SELECT config_data FROM svccfg.cs_menu_version ORDER BY created_time DESC LIMIT 1
+    latest-version-sql: SELECT version FROM svccfg.cs_menu_version ORDER BY created_time DESC LIMIT 1
 
   # ============= M03 对话历史管理 =============
   history:
