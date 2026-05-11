@@ -12,6 +12,9 @@ import redis.clients.jedis.JedisPool;
 import redis.clients.jedis.Pipeline;
 import redis.clients.jedis.exceptions.JedisException;
 
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -28,6 +31,8 @@ import java.util.List;
 public class DialogHistoryManagerImpl implements DialogHistoryManager {
 
     private static final String KEY_PREFIX = "copilot:history:";
+    private static final DateTimeFormatter CREATE_TIME_FMT =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     private final JedisPool jedisPool;
     private final HistoryProperties props;
@@ -50,8 +55,8 @@ public class DialogHistoryManagerImpl implements DialogHistoryManager {
         }
 
         String key = KEY_PREFIX + callId;
-        try (Jedis jedis = jedisPool.getResource()) {
-            Pipeline pipeline = jedis.pipelined();
+        try (Jedis jedis = jedisPool.getResource();
+             Pipeline pipeline = jedis.pipelined()) {
             pipeline.rpush(key, json);
             // 保留尾部最新的 maxSize 条，超出时裁剪头部旧数据
             pipeline.ltrim(key, -props.getMaxSize(), -1);
@@ -114,8 +119,23 @@ public class DialogHistoryManagerImpl implements DialogHistoryManager {
                 .role(role)
                 .content(event.getContent())
                 .contentType("text")
-                .createTime(event.getBeginTime())
+                .createTime(formatBeginTime(event.getBeginTime()))
                 .speakerRole(event.getSpeakerRole())
                 .build();
+    }
+
+    /** ISO 8601 → yyyy-MM-dd HH:mm:ss（UTC），beginTime 为 null 或解析失败时返回当前时间。 */
+    private static String formatBeginTime(String beginTime) {
+        if (beginTime == null || beginTime.isEmpty()) {
+            return LocalDateTime.now().format(CREATE_TIME_FMT);
+        }
+        try {
+            return Instant.parse(beginTime)
+                    .atOffset(java.time.ZoneOffset.UTC)
+                    .toLocalDateTime()
+                    .format(CREATE_TIME_FMT);
+        } catch (Exception e) {
+            return LocalDateTime.now().format(CREATE_TIME_FMT);
+        }
     }
 }
