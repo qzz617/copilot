@@ -133,7 +133,6 @@ copilot:
   # 单通话限制（DD-V1.2 P1-4）
   call-limits:
     max-ai-calls: 50
-    max-history-size: 50
     intent-cooldown-sec: 60
 
   # 灰度白名单（DD-V1.2 P1-9，最简方案）
@@ -146,6 +145,11 @@ copilot:
   # 多 Pod 配置一致性轮询（DD-V1.2 P1-17）
   config-refresh:
     polling-interval-ms: 30000
+
+  # ============= M03 对话历史管理 =============
+  history:
+    max-size: 50
+    ttl-hours: 1
 
 # ============= 日志配置 =============
 logging:
