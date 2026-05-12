@@ -5,10 +5,9 @@ import com.cmbchina.cs.assitsvc.config.CopilotConfigCache;
 import com.cmbchina.cs.assitsvc.config.MenuVersionDao;
 import com.cmbchina.cs.assitsvc.core.intent.IntentTreeLoader;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
-import redis.clients.jedis.Jedis;
-import redis.clients.jedis.JedisPool;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -24,7 +23,7 @@ public class HealthController {
 
     private final CopilotConfigCache configCache;
     private final IntentTreeLoader intentTreeLoader;
-    private final JedisPool jedisPool;
+    private final StringRedisTemplate redisTemplate;
     private final MenuVersionDao menuVersionDao;
 
     /**
@@ -51,8 +50,9 @@ public class HealthController {
     }
 
     private String checkRedis() {
-        try (Jedis jedis = jedisPool.getResource()) {
-            return "PONG".equals(jedis.ping()) ? "UP" : "DOWN";
+        try {
+            String pong = redisTemplate.execute(connection -> connection.ping());
+            return "PONG".equals(pong) ? "UP" : "DOWN";
         } catch (Exception e) {
             return "DOWN";
         }

@@ -6,6 +6,7 @@ import org.springframework.messaging.simp.config.MessageBrokerRegistry;
 import org.springframework.util.CollectionUtils;
 import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBroker;
 import org.springframework.web.socket.config.annotation.StompEndpointRegistry;
+import org.springframework.web.socket.config.annotation.StompWebSocketEndpointRegistration;
 import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerConfigurer;
 
 /**
@@ -27,12 +28,11 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
-        if (CollectionUtils.isEmpty(properties.getAllowedOriginPatterns())) {
-            registry.addEndpoint("/copilot/ws").withSockJS();
-            return;
+        StompWebSocketEndpointRegistration registration = registry.addEndpoint("/copilot/ws")
+                .setHandshakeHandler(new OperatorPrincipalHandshakeHandler(properties));
+        if (!CollectionUtils.isEmpty(properties.getAllowedOriginPatterns())) {
+            registration.setAllowedOriginPatterns(properties.getAllowedOriginPatterns().toArray(new String[0]));
         }
-        registry.addEndpoint("/copilot/ws")
-                .setAllowedOriginPatterns(properties.getAllowedOriginPatterns().toArray(new String[0]))
-                .withSockJS();
+        registration.withSockJS();
     }
 }

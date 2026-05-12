@@ -2,12 +2,12 @@ package com.cmbchina.cs.assitsvc.asr;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataAccessException;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
-import redis.clients.jedis.Jedis;
-import redis.clients.jedis.JedisPool;
-import redis.clients.jedis.exceptions.JedisException;
-import redis.clients.jedis.params.SetParams;
+
+import java.util.concurrent.TimeUnit;
 
 /**
  * ASR sentenceId 去重服务。
@@ -19,9 +19,10 @@ import redis.clients.jedis.params.SetParams;
 @RequiredArgsConstructor
 public class SentenceDedupService {
 
-    private static final String KEY_PREFIX = "copilot:asr_dedup:";
+    private static final String KEY_PREFIX = "copilot:asr_dedup:{";
+    private static final String KEY_SUFFIX = "}";
 
-    private final JedisPool jedisPool;
+    private final StringRedisTemplate redisTemplate;
     private final AsrProperties props;
 
     /**
@@ -35,14 +36,12 @@ public class SentenceDedupService {
             throw new IllegalArgumentException("sentenceId must not be null or empty");
         }
 
-        String key = KEY_PREFIX + sentenceId;
-        try (Jedis jedis = jedisPool.getResource()) {
-            String result = jedis.set(key, "1", new SetParams().nx().ex(dedupTtlSeconds()));
-            if ("OK".equals(result)) {
-                return false;
-            }
-            return true;
-        } catch (JedisException e) {
+        String key = KEY_PREFIX + sentenceId + KEY_SUFFIX;
+        try {
+            Boolean inserted = redisTemplate.opsForValue()
+                    .setIfAbsent(key, "1", dedupTtlSeconds(), TimeUnit.SECONDS);
+            return !Boolean.TRUE.equals(inserted);
+        } catch (DataAccessException e) {
             log.warn("[M01] Redis sentence dedup failed, sentenceId={}", sentenceId, e);
             return false;
         }

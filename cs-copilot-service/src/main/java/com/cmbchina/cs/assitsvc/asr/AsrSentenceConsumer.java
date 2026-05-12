@@ -35,7 +35,7 @@ public class AsrSentenceConsumer {
     public void consume(ConsumerRecord<String, String> record, Acknowledgment ack) {
         String payload = record.value();
         try {
-            process(payload);
+            process(payload, record.key(), record.partition(), record.offset());
         } catch (Exception e) {
             log.error("[M01] Process ASR event failed, payload={}", payload, e);
         } finally {
@@ -43,7 +43,7 @@ public class AsrSentenceConsumer {
         }
     }
 
-    void process(String payload) {
+    void process(String payload, String recordKey, int partition, long offset) {
         AsrSentenceEvent event = parser.parse(payload);
         if (!basicValid(event)) {
             log.warn("[M01] Invalid ASR event ignored, event={}", event);
@@ -59,6 +59,9 @@ public class AsrSentenceConsumer {
         historyManager.append(event.getCallId(), event);
 
         if (!"CUSTOMER".equalsIgnoreCase(event.getSpeakerRole())) {
+            return;
+        }
+        if (!routeValid(event, recordKey, partition, offset)) {
             return;
         }
         if (!triggerValid(event)) {
@@ -86,6 +89,18 @@ public class AsrSentenceConsumer {
         }
 
         return confidence >= props.getAsrConfidenceThreshold();
+    }
+
+    private boolean routeValid(AsrSentenceEvent event, String recordKey, int partition, long offset) {
+        if (!props.isRequireCallIdKey()) {
+            return true;
+        }
+        if (event.getCallId().equals(recordKey)) {
+            return true;
+        }
+        log.error("[M01] ASR event Kafka key mismatch, trigger skipped, callId={}, recordKey={}, partition={}, offset={}",
+                event.getCallId(), recordKey, partition, offset);
+        return false;
     }
 
     private static void acknowledge(Acknowledgment ack) {

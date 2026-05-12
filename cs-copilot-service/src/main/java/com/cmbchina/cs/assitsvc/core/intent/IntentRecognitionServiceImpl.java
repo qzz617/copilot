@@ -12,11 +12,11 @@ import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DataAccessException;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
-import redis.clients.jedis.Jedis;
-import redis.clients.jedis.JedisPool;
-import redis.clients.jedis.exceptions.JedisException;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -31,18 +31,20 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class IntentRecognitionServiceImpl implements IntentRecognitionService {
 
-    private static final String AI_COUNT_KEY_PREFIX = "copilot:ai_count:";
+    private static final String AI_COUNT_KEY_PREFIX = "copilot:ai_count:{";
+    private static final String AI_COUNT_KEY_SUFFIX = "}";
     private static final int AI_COUNT_TTL_SECONDS = 2 * 3600;
-    private static final String AI_COUNT_SCRIPT =
+    private static final DefaultRedisScript<Long> AI_COUNT_SCRIPT = new DefaultRedisScript<>(
             "local count = redis.call('INCR', KEYS[1]); "
                     + "if count == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]); end; "
-                    + "return count;";
+                    + "return count;",
+            Long.class);
 
     private final AiIntentFeignClient feignClient;
     private final DialogHistoryManager historyManager;
     private final IntentTreeLoader treeLoader;
     private final ExecutedStepsManager stepsManager;
-    private final JedisPool jedisPool;
+    private final StringRedisTemplate redisTemplate;
 
     @Value("${copilot.call-limits.max-ai-calls:50}")
     private int maxAiCalls;
@@ -138,27 +140,16 @@ public class IntentRecognitionServiceImpl implements IntentRecognitionService {
     }
 
     private boolean allowAiCall(String callId) {
-        String key = AI_COUNT_KEY_PREFIX + callId;
-        try (Jedis jedis = jedisPool.getResource()) {
-            Object result = jedis.eval(AI_COUNT_SCRIPT,
+        String key = AI_COUNT_KEY_PREFIX + callId + AI_COUNT_KEY_SUFFIX;
+        try {
+            Long count = redisTemplate.execute(AI_COUNT_SCRIPT,
                     Collections.singletonList(key),
-                    Collections.singletonList(String.valueOf(AI_COUNT_TTL_SECONDS)));
-            Long count = toLong(result);
+                    String.valueOf(AI_COUNT_TTL_SECONDS));
             return count == null || count <= maxAiCalls;
-        } catch (JedisException e) {
+        } catch (DataAccessException e) {
             log.warn("[M06] Redis AI call count failed, callId={}", callId, e);
             return true;
         }
-    }
-
-    private static Long toLong(Object value) {
-        if (value == null) {
-            return null;
-        }
-        if (value instanceof Number) {
-            return ((Number) value).longValue();
-        }
-        return Long.valueOf(String.valueOf(value));
     }
 
     private static String generateRequestId() {

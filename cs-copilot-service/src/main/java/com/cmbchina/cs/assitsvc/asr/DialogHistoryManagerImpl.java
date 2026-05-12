@@ -6,11 +6,9 @@ import com.cmbchina.cs.assitsvc.domain.DialogMessage;
 import com.cmbchina.cs.assitsvc.infra.redis.HistoryProperties;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataAccessException;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
-import redis.clients.jedis.Jedis;
-import redis.clients.jedis.JedisPool;
-import redis.clients.jedis.Pipeline;
-import redis.clients.jedis.exceptions.JedisException;
 
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -23,18 +21,19 @@ import java.util.List;
  * {@link DialogHistoryManager} 的 Redis 实现。
  *
  * <p>Redis key 格式：{@code copilot:history:{callId}}，类型 List。
- * 每次 append 用 Pipeline 批发 RPUSH + LTRIM + EXPIRE，减少网络往返。
+ * 每次 append 写入尾部后裁剪到最新 maxSize 条，并刷新 TTL。
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class DialogHistoryManagerImpl implements DialogHistoryManager {
 
-    private static final String KEY_PREFIX = "copilot:history:";
+    private static final String KEY_PREFIX = "copilot:history:{";
+    private static final String KEY_SUFFIX = "}";
     private static final DateTimeFormatter CREATE_TIME_FMT =
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
-    private final JedisPool jedisPool;
+    private final StringRedisTemplate redisTemplate;
     private final HistoryProperties props;
 
     @Override
@@ -54,15 +53,13 @@ public class DialogHistoryManagerImpl implements DialogHistoryManager {
             return;
         }
 
-        String key = KEY_PREFIX + callId;
-        try (Jedis jedis = jedisPool.getResource();
-             Pipeline pipeline = jedis.pipelined()) {
-            pipeline.rpush(key, json);
+        String key = key(callId);
+        try {
+            redisTemplate.opsForList().rightPush(key, json);
             // 保留尾部最新的 maxSize 条，超出时裁剪头部旧数据
-            pipeline.ltrim(key, -props.getMaxSize(), -1);
-            pipeline.expire(key, props.getTtlHours() * 3600);
-            pipeline.sync();
-        } catch (JedisException e) {
+            redisTemplate.opsForList().trim(key, -props.getMaxSize(), -1);
+            redisTemplate.expire(key, props.getTtlHours() * 3600L, java.util.concurrent.TimeUnit.SECONDS);
+        } catch (DataAccessException e) {
             log.warn("[M03] Redis append failed, callId={}", callId, e);
         }
     }
@@ -73,12 +70,14 @@ public class DialogHistoryManagerImpl implements DialogHistoryManager {
             throw new IllegalArgumentException("callId must not be null or empty");
         }
 
-        String key = KEY_PREFIX + callId;
         List<String> jsonList;
-        try (Jedis jedis = jedisPool.getResource()) {
-            jsonList = jedis.lrange(key, 0, -1);
-        } catch (JedisException e) {
+        try {
+            jsonList = redisTemplate.opsForList().range(key(callId), 0, -1);
+        } catch (DataAccessException e) {
             log.warn("[M03] Redis getHistory failed, callId={}", callId, e);
+            return Collections.emptyList();
+        }
+        if (jsonList == null) {
             return Collections.emptyList();
         }
 
@@ -99,10 +98,9 @@ public class DialogHistoryManagerImpl implements DialogHistoryManager {
             throw new IllegalArgumentException("callId must not be null or empty");
         }
 
-        String key = KEY_PREFIX + callId;
-        try (Jedis jedis = jedisPool.getResource()) {
-            jedis.del(key);
-        } catch (JedisException e) {
+        try {
+            redisTemplate.delete(key(callId));
+        } catch (DataAccessException e) {
             log.warn("[M03] Redis cleanup failed, callId={}", callId, e);
         }
     }
@@ -137,5 +135,9 @@ public class DialogHistoryManagerImpl implements DialogHistoryManager {
         } catch (Exception e) {
             return LocalDateTime.now().format(CREATE_TIME_FMT);
         }
+    }
+
+    private static String key(String callId) {
+        return KEY_PREFIX + callId + KEY_SUFFIX;
     }
 }

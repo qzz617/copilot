@@ -29,4 +29,7 @@ public class AsrProperties {
 
     /** sentenceId 去重 key 的保留时间。 */
     private int dedupTtlHours = 2;
+
+    /** 是否要求 Kafka record key 必须等于 callId，用于保证同一通话消息路由到同一分区。 */
+    private boolean requireCallIdKey = true;
 }

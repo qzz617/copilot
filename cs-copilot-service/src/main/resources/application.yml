@@ -20,14 +20,14 @@ spring:
       ack-mode: MANUAL_IMMEDIATE
       concurrency: 4
 
-  # ============= Redis 配置（Jedis 客户端，不是 Lettuce） =============
+  # ============= Redis 配置（RedisTemplate，默认 Lettuce，生产可切换 Sentinel/Cluster） =============
   redis:
     host: ${REDIS_HOST:localhost}
     port: ${REDIS_PORT:6379}
     password: ${REDIS_PASSWORD:}
     database: 0
     timeout: 2000ms
-    jedis:
+    lettuce:
       pool:
         max-active: 20
         max-idle: 10
@@ -84,6 +84,8 @@ copilot:
     # confidence 缺失策略：true=允许通过，false=拒绝
     asr-confidence-default-pass: true
     dedup-ttl-hours: 2
+    # 生产要求 Kafka record key = callId，保证同一通话 ASR 进入同一分区
+    require-call-id-key: true
 
   # 防抖参数
   debounce:
@@ -91,6 +93,8 @@ copilot:
     neutral-ms: 1500
     incomplete-ms: 3000
     silence-ms: 2000
+    polling-interval-ms: 200
+    polling-batch-size: 100
 
   # 意图树（配置文件，本期固定值）
   intent-tree:
@@ -167,11 +171,13 @@ copilot:
       - https://cccsweb.paas.cmbchina.cn
       - https://frdctrfront.paasuat.cmbchina.cn
       - https://mccusweb.paasuat.cmbchina.cn
+    cluster-push-channel: copilot:push:directive
+    operator-id-header: X-Copilot-Operator-Id
+    operator-id-query-param: operatorId
 
   # 多 Pod 配置一致性轮询（DD-V1.2 P1-17）
   config-refresh:
     polling-interval-ms: 30000
-    lock-ttl-seconds: 30
 
   # ============= M03 对话历史管理 =============
   history:

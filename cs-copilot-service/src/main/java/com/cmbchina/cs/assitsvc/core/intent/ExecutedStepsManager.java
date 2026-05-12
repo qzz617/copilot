@@ -4,15 +4,15 @@ import com.alibaba.fastjson2.JSON;
 import com.cmbchina.cs.assitsvc.domain.ExecutedStep;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataAccessException;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
-import redis.clients.jedis.Jedis;
-import redis.clients.jedis.JedisPool;
-import redis.clients.jedis.exceptions.JedisException;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 已执行步骤管理器。
@@ -22,10 +22,11 @@ import java.util.List;
 @RequiredArgsConstructor
 public class ExecutedStepsManager {
 
-    private static final String KEY_PREFIX = "copilot:steps:";
+    private static final String KEY_PREFIX = "copilot:steps:{";
+    private static final String KEY_SUFFIX = "}";
     private static final int STEPS_TTL_SECONDS = 3600;
 
-    private final JedisPool jedisPool;
+    private final StringRedisTemplate redisTemplate;
 
     /**
      * 追加已执行步骤。
@@ -46,10 +47,10 @@ public class ExecutedStepsManager {
                 .build();
 
         String key = key(callId);
-        try (Jedis jedis = jedisPool.getResource()) {
-            jedis.rpush(key, JSON.toJSONString(step));
-            jedis.expire(key, STEPS_TTL_SECONDS);
-        } catch (JedisException e) {
+        try {
+            redisTemplate.opsForList().rightPush(key, JSON.toJSONString(step));
+            redisTemplate.expire(key, STEPS_TTL_SECONDS, TimeUnit.SECONDS);
+        } catch (DataAccessException e) {
             log.warn("[M06] Redis append executed step failed, callId={}, intentCode={}", callId, intentCode, e);
         }
     }
@@ -66,10 +67,13 @@ public class ExecutedStepsManager {
         }
 
         List<String> rawList;
-        try (Jedis jedis = jedisPool.getResource()) {
-            rawList = jedis.lrange(key(callId), 0, -1);
-        } catch (JedisException e) {
+        try {
+            rawList = redisTemplate.opsForList().range(key(callId), 0, -1);
+        } catch (DataAccessException e) {
             log.warn("[M06] Redis get executed steps failed, callId={}", callId, e);
+            return Collections.emptyList();
+        }
+        if (rawList == null) {
             return Collections.emptyList();
         }
 
@@ -93,14 +97,14 @@ public class ExecutedStepsManager {
         if (!StringUtils.hasText(callId)) {
             throw new IllegalArgumentException("callId must not be null or empty");
         }
-        try (Jedis jedis = jedisPool.getResource()) {
-            jedis.del(key(callId));
-        } catch (JedisException e) {
+        try {
+            redisTemplate.delete(key(callId));
+        } catch (DataAccessException e) {
             log.warn("[M06] Redis cleanup executed steps failed, callId={}", callId, e);
         }
     }
 
     private static String key(String callId) {
-        return KEY_PREFIX + callId;
+        return KEY_PREFIX + callId + KEY_SUFFIX;
     }
 }

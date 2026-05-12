@@ -2,12 +2,13 @@ package com.cmbchina.cs.assitsvc.core.feedback;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataAccessException;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
-import redis.clients.jedis.Jedis;
-import redis.clients.jedis.JedisPool;
-import redis.clients.jedis.Transaction;
-import redis.clients.jedis.exceptions.JedisException;
+
+import java.util.Arrays;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 本通话静默列表管理器。
@@ -17,14 +18,16 @@ import redis.clients.jedis.exceptions.JedisException;
 @RequiredArgsConstructor
 public class MuteListManager {
 
-    private static final String INTENT_KEY_PREFIX = "copilot:mute:intent:";
-    private static final String ITEM_KEY_PREFIX = "copilot:mute:item:";
+    private static final String INTENT_KEY_PREFIX = "copilot:mute:{";
+    private static final String INTENT_KEY_SUFFIX = "}:intent";
+    private static final String ITEM_KEY_PREFIX = "copilot:mute:{";
+    private static final String ITEM_KEY_SUFFIX = "}:item";
     private static final int CALL_MUTE_TTL_SECONDS = 2 * 3600;
 
-    private final JedisPool jedisPool;
+    private final StringRedisTemplate redisTemplate;
 
     public void muteIntent(String callId, String intentCode, int ttlSeconds) {
-        addToSet(INTENT_KEY_PREFIX + callId, intentCode, ttlSeconds);
+        addToSet(intentKey(callId), intentCode, ttlSeconds);
     }
 
     public void muteIntentForCall(String callId, String intentCode) {
@@ -33,25 +36,25 @@ public class MuteListManager {
 
     public void muteItemForCall(String callId, Long itemId) {
         if (itemId != null) {
-            addToSet(ITEM_KEY_PREFIX + callId, String.valueOf(itemId), CALL_MUTE_TTL_SECONDS);
+            addToSet(itemKey(callId), String.valueOf(itemId), CALL_MUTE_TTL_SECONDS);
         }
     }
 
     public boolean isIntentMuted(String callId, String intentCode) {
-        return isMember(INTENT_KEY_PREFIX + callId, intentCode);
+        return isMember(intentKey(callId), intentCode);
     }
 
     public boolean isItemMuted(String callId, Long itemId) {
-        return itemId != null && isMember(ITEM_KEY_PREFIX + callId, String.valueOf(itemId));
+        return itemId != null && isMember(itemKey(callId), String.valueOf(itemId));
     }
 
     public void cleanup(String callId) {
         if (!StringUtils.hasText(callId)) {
             return;
         }
-        try (Jedis jedis = jedisPool.getResource()) {
-            jedis.del(INTENT_KEY_PREFIX + callId, ITEM_KEY_PREFIX + callId);
-        } catch (JedisException e) {
+        try {
+            redisTemplate.delete(Arrays.asList(intentKey(callId), itemKey(callId)));
+        } catch (DataAccessException e) {
             log.warn("[M11] Redis cleanup mute list failed, callId={}", callId, e);
         }
     }
@@ -60,12 +63,10 @@ public class MuteListManager {
         if (!StringUtils.hasText(value)) {
             return;
         }
-        try (Jedis jedis = jedisPool.getResource()) {
-            Transaction tx = jedis.multi();
-            tx.sadd(key, value);
-            tx.expire(key, ttlSeconds);
-            tx.exec();
-        } catch (JedisException e) {
+        try {
+            redisTemplate.opsForSet().add(key, value);
+            redisTemplate.expire(key, ttlSeconds, TimeUnit.SECONDS);
+        } catch (DataAccessException e) {
             log.warn("[M11] Redis mute failed, key={}, value={}", key, value, e);
         }
     }
@@ -74,11 +75,19 @@ public class MuteListManager {
         if (!StringUtils.hasText(value)) {
             return false;
         }
-        try (Jedis jedis = jedisPool.getResource()) {
-            return jedis.sismember(key, value);
-        } catch (JedisException e) {
+        try {
+            return Boolean.TRUE.equals(redisTemplate.opsForSet().isMember(key, value));
+        } catch (DataAccessException e) {
             log.warn("[M11] Redis mute check failed, key={}, value={}", key, value, e);
             return false;
         }
+    }
+
+    private static String intentKey(String callId) {
+        return INTENT_KEY_PREFIX + callId + INTENT_KEY_SUFFIX;
+    }
+
+    private static String itemKey(String callId) {
+        return ITEM_KEY_PREFIX + callId + ITEM_KEY_SUFFIX;
     }
 }

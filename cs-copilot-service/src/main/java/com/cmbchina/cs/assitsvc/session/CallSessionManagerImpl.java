@@ -3,15 +3,14 @@ package com.cmbchina.cs.assitsvc.session;
 import com.cmbchina.cs.assitsvc.domain.CallSession;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataAccessException;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
-import redis.clients.jedis.Jedis;
-import redis.clients.jedis.JedisPool;
-import redis.clients.jedis.Transaction;
-import redis.clients.jedis.exceptions.JedisException;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 /**
  * {@link CallSessionManager} 的 Redis Hash 实现。
@@ -23,7 +22,8 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class CallSessionManagerImpl implements CallSessionManager {
 
-    private static final String KEY_PREFIX = "copilot:call_session:";
+    private static final String KEY_PREFIX = "copilot:call_session:{";
+    private static final String KEY_SUFFIX = "}";
     private static final int SESSION_TTL_SECONDS = 30 * 60;
 
     private static final String FIELD_OPERATOR_ID = "operatorId";
@@ -31,7 +31,7 @@ public class CallSessionManagerImpl implements CallSessionManager {
     private static final String FIELD_CUSTOMER_TYPE = "customerType";
     private static final String FIELD_SESSION_START_TIME = "sessionStartTime";
 
-    private final JedisPool jedisPool;
+    private final StringRedisTemplate redisTemplate;
 
     @Override
     public void bind(CallSession session) {
@@ -52,12 +52,10 @@ public class CallSessionManagerImpl implements CallSessionManager {
         fields.put(FIELD_SESSION_START_TIME, resolveSessionStartTime(session));
 
         String key = key(session.getCallId());
-        try (Jedis jedis = jedisPool.getResource()) {
-            Transaction tx = jedis.multi();
-            tx.hmset(key, fields);
-            tx.expire(key, SESSION_TTL_SECONDS);
-            tx.exec();
-        } catch (JedisException e) {
+        try {
+            redisTemplate.opsForHash().putAll(key, fields);
+            redisTemplate.expire(key, SESSION_TTL_SECONDS, TimeUnit.SECONDS);
+        } catch (DataAccessException e) {
             log.warn("[M04] Redis bind call session failed, callId={}, operatorId={}",
                     session.getCallId(), session.getOperatorId(), e);
         }
@@ -70,9 +68,9 @@ public class CallSessionManagerImpl implements CallSessionManager {
         }
 
         Map<String, String> fields;
-        try (Jedis jedis = jedisPool.getResource()) {
-            fields = jedis.hgetAll(key(callId));
-        } catch (JedisException e) {
+        try {
+            fields = readHash(key(callId));
+        } catch (DataAccessException e) {
             log.warn("[M04] Redis get call session failed, callId={}", callId, e);
             return null;
         }
@@ -96,9 +94,9 @@ public class CallSessionManagerImpl implements CallSessionManager {
             throw new IllegalArgumentException("callId must not be null or empty");
         }
 
-        try (Jedis jedis = jedisPool.getResource()) {
-            jedis.del(key(callId));
-        } catch (JedisException e) {
+        try {
+            redisTemplate.delete(key(callId));
+        } catch (DataAccessException e) {
             log.warn("[M04] Redis cleanup call session failed, callId={}", callId, e);
         }
     }
@@ -117,6 +115,15 @@ public class CallSessionManagerImpl implements CallSessionManager {
     }
 
     private static String key(String callId) {
-        return KEY_PREFIX + callId;
+        return KEY_PREFIX + callId + KEY_SUFFIX;
+    }
+
+    private Map<String, String> readHash(String key) {
+        Map<Object, Object> rawFields = redisTemplate.opsForHash().entries(key);
+        Map<String, String> fields = new HashMap<>();
+        for (Map.Entry<Object, Object> entry : rawFields.entrySet()) {
+            fields.put(String.valueOf(entry.getKey()), entry.getValue() == null ? null : String.valueOf(entry.getValue()));
+        }
+        return fields;
     }
 }
