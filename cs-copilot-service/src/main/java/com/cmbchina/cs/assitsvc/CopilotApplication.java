@@ -1,5 +1,6 @@
 package com.cmbchina.cs.assitsvc;
 
+import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.cloud.openfeign.EnableFeignClients;
@@ -23,6 +24,10 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @EnableFeignClients(basePackages = "com.cmbchina.cs.assitsvc.infra.feign")
 @EnableKafka
 @EnableScheduling
+@MapperScan({
+        "com.cmbchina.cs.assitsvc.config.mapper",
+        "com.cmbchina.cs.assitsvc.infra.metrics.mapper"
+})
 public class CopilotApplication {
 
     public static void main(String[] args) {
