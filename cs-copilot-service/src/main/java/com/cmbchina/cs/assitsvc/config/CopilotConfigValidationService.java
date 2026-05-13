@@ -1,17 +1,17 @@
 package com.cmbchina.cs.assitsvc.config;
 
-import com.cmbchina.cs.assitsvc.domain.MenuVersionData;
+import com.cmbchina.cs.assitsvc.domain.CopilotConfigSnapshot;
 
 /**
- * Copilot CLOB 基础校验服务。
+ * Copilot 配置基础校验服务。
  */
 public interface CopilotConfigValidationService {
 
     /**
-     * 校验 CLOB 配置。
+     * 校验 Copilot 配置快照。
      *
-     * @param data CLOB 数据
+     * @param snapshot 配置快照
      * @return 校验结果
      */
-    ConfigValidationResult validate(MenuVersionData data);
+    ConfigValidationResult validate(CopilotConfigSnapshot snapshot);
 }

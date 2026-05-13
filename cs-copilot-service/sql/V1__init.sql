@@ -8,12 +8,36 @@
 --   cs_menu_group, cs_menu_module, cs_menu_module_item,
 --   cs_menu_group_authority, cs_menu_version
 --
--- 本期新增表（4 张）：
+-- 本期新增表（5 张）：
+--   cs_copilot_config_version      Copilot 配置版本
 --   cs_copilot_action              Copilot 动作配置
 --   cs_copilot_intent_mapping      意图-动作映射
 --   cs_copilot_trigger_log         触发日志
 --   cs_copilot_feedback_log        反馈日志
 -- =========================================================================
+
+-- =========================================================================
+-- Table: cs_copilot_config_version
+-- Copilot 配置版本表；独立于 cs_menu_version
+-- =========================================================================
+CREATE TABLE svccfg.cs_copilot_config_version (
+    version_id              varchar(32) NOT NULL,
+    publish_status          varchar(16) DEFAULT 'PUBLISHED' NOT NULL,
+                            -- PUBLISHED / DISABLED
+    change_summary          varchar(512),
+
+    -- 审计
+    created_by              varchar(32) NOT NULL,
+    created_name            varchar(40) NOT NULL,
+    created_time            timestamp NOT NULL,
+
+    CONSTRAINT cs_copilot_config_version_pkey PRIMARY KEY (version_id)
+);
+
+CREATE INDEX idx_copilot_config_version_time
+    ON svccfg.cs_copilot_config_version(created_time);
+
+COMMENT ON TABLE svccfg.cs_copilot_config_version IS 'Copilot 配置版本表';
 
 -- =========================================================================
 -- Table: cs_copilot_action
@@ -24,6 +48,7 @@ CREATE TABLE svccfg.cs_copilot_action (
 
     -- 可选快捷导航关联，不加外键，发布流程负责校验
     menu_item_id            numeric(131089,0),
+    item_snapshot_json      text,
 
     -- 动作基本信息
     action_name             varchar(128) NOT NULL,
@@ -31,12 +56,13 @@ CREATE TABLE svccfg.cs_copilot_action (
     function_path           varchar(256),
 
     -- 打开方式
-    target_kind             varchar(16) NOT NULL,
+    target_kind             varchar(16),
                             -- URL / ROUTE / IFRAME / NEW_WINDOW
-    open_mode               varchar(16) NOT NULL,
+    open_mode               varchar(16),
                             -- CURRENT_TAB / NEW_TAB / WINDOW / IFRAME
     target_url              varchar(512),
     route_path              varchar(256),
+    window_feature          varchar(256),
 
     -- AI 展示文案
     ai_display_text         varchar(128) NOT NULL,
@@ -223,6 +249,11 @@ COMMENT ON TABLE svccfg.cs_copilot_feedback_log IS 'Copilot 反馈日志';
 -- =========================================================================
 
 -- 示例：境外行程报备（纯意图唤起，不依赖快捷导航）
+-- INSERT INTO svccfg.cs_copilot_config_version
+--     (version_id, publish_status, change_summary, created_by, created_name, created_time)
+-- VALUES
+--     ('202605130001', 'PUBLISHED', '初始化 Copilot 配置', 'admin', '系统管理员', NOW());
+--
 -- INSERT INTO svccfg.cs_copilot_action
 --     (action_id, menu_item_id, action_name, enabled, function_path,
 --      target_kind, open_mode, target_url, ai_display_text, floating_tip_text,

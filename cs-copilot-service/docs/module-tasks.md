@@ -58,8 +58,7 @@ com.cmbchina.cs.assitsvc.domain
 ├── ActionInfo                 # 指令-动作信息
 ├── RiskInfo                   # 指令-风险信息
 ├── FeedbackRequest            # 反馈请求
-├── MenuVersionData            # CLOB 数据
-└── CopilotIndex               # CLOB 反向索引
+└── CopilotConfigSnapshot      # Copilot 独立配置快照
 ```
 
 **关键约束**：
@@ -352,8 +351,8 @@ com.cmbchina.cs.assitsvc.core.intent
 com.cmbchina.cs.assitsvc.core.match
 ├── IntentFunctionMatcherService     # 接口
 ├── IntentFunctionMatcherServiceImpl # 实现
-├── CopilotConfigCache               # CLOB 内存缓存
-└── MenuVersionDao                   # 数据库读取
+├── CopilotConfigCache               # CopilotConfigSnapshot 内存缓存
+└── CopilotConfigRepository          # 独立配置表读取
 ```
 
 **关键约束**：
@@ -455,25 +454,26 @@ com.cmbchina.cs.assitsvc.config
 ```
 
 **关键约束**：
-- 每 30 秒查询 cs_menu_version 最新 active 版本
+- 每 30 秒查询 `cs_copilot_config_version` 最新已发布版本
 - 与本地 currentVersion 不一致时触发 reload
 - 用 `@Scheduled(fixedDelayString = "${copilot.config-refresh.polling-interval-ms}")`
 
 ---
 
-## 阶段 7：CLOB 扩展（涉及存量代码）
+## 阶段 7：Copilot 配置发布
 
-### Task M12：CLOB 生成扩展
+### Task M12：Copilot 配置发布与校验
 
 **输入**：DD-V1.2 第 22 章
 
 **关键约束**：
-- 改动存量代码（菜单管理后台一键发布逻辑）
-- 在 items 节点嵌入 copilotExt
-- 新增 copilotIndex 反向索引
+- 不改动 `cs_menu_version.config_data`
+- 发布 `cs_copilot_config_version`
+- 从 `cs_copilot_action`、`cs_copilot_intent_mapping` 构建运行时快照
+- 关联 `menu_item_id` 时读取 `cs_menu_item` / `cs_menu_item_param` 做一致性校验
 - DD-V1.2 P1-8：发布前基础校验
 
-**协调对象**：存量发布团队
+**协调对象**：Copilot 配置后台团队；若关联菜单项，需要与菜单配置团队确认启用值和打开方式契约
 
 ---
 

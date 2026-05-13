@@ -14,7 +14,7 @@ import org.springframework.util.StringUtils;
 @RequiredArgsConstructor
 public class ConfigVersionPoller {
 
-    private final MenuVersionDao menuVersionDao;
+    private final CopilotConfigRepository configRepository;
     private final CopilotConfigCache configCache;
 
     /**
@@ -23,7 +23,7 @@ public class ConfigVersionPoller {
     @Scheduled(fixedDelayString = "${copilot.config-refresh.polling-interval-ms:30000}")
     public void poll() {
         try {
-            String latestVersion = menuVersionDao.fetchLatestVersionMarker();
+            String latestVersion = configRepository.fetchLatestVersionMarker();
             String currentVersion = configCache.getCurrentVersion();
             if (!StringUtils.hasText(latestVersion) || latestVersion.equals(currentVersion)) {
                 return;

@@ -8,7 +8,7 @@ import lombok.NoArgsConstructor;
 import java.util.List;
 
 /**
- * Copilot 可唤起动作配置，对应 CLOB copilotIndex.actionById 中的单条记录。
+ * Copilot 可唤起动作配置，对应 cs_copilot_action 加载后的运行时记录。
  */
 @Data
 @Builder
@@ -21,6 +21,9 @@ public class CopilotActionConfig {
 
     /** 可选快捷导航菜单 ID；纯意图唤起动作为空 */
     private Long menuItemId;
+
+    /** 可选菜单项快照，仅用于校验和审计 */
+    private String itemSnapshotJson;
 
     /** 动作名称 */
     private String actionName;
@@ -42,6 +45,9 @@ public class CopilotActionConfig {
 
     /** ROUTE 场景的前端路由路径 */
     private String routePath;
+
+    /** NEW_WINDOW 场景的新窗口特性 */
+    private String windowFeature;
 
     /** 浮窗 AI 展示文字 */
     private String aiDisplayText;

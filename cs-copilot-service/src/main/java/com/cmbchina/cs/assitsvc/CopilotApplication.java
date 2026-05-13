@@ -13,7 +13,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
  * <p>启动后会：
  * <ul>
  *     <li>从 classpath:intent-tree.json 加载意图树</li>
- *     <li>从存量 cs_menu_version 加载最新 CLOB 配置到内存</li>
+ *     <li>从 Copilot 独立配置表加载最新配置快照到内存</li>
  *     <li>开始监听 Kafka topic cs.asr.sentences</li>
  *     <li>每 30 秒轮询配置版本号兜底（多 Pod 一致性）</li>
  * </ul>

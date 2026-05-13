@@ -9,13 +9,19 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * CLOB 反向索引，存于 MenuVersionData.copilotIndex，加速意图-动作查找。
+ * Copilot 运行时配置快照，由独立配置表加载后在本地内存构建。
  */
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class CopilotIndex {
+public class CopilotConfigSnapshot {
+
+    /** Copilot 配置版本号 */
+    private String versionId;
+
+    /** 快照构建时间，ISO 8601 格式 */
+    private String buildTime;
 
     /** 意图代码 → 候选动作引用列表（含优先级），key 为 intentCode */
     private Map<String, List<ActionReference>> intentToActions;

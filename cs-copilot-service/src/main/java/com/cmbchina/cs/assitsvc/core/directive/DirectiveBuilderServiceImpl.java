@@ -61,7 +61,8 @@ public class DirectiveBuilderServiceImpl implements DirectiveBuilderService {
                 .intent(buildIntent(intentResult))
                 .function(buildFunction(action))
                 .display(buildDisplay(intentResult, action))
-                .action(buildAction(targetKind, openMode, actionType, actionUrl, paramResult.getParams()))
+                .action(buildAction(resolveTargetSource(action), targetKind, openMode, actionType,
+                        actionUrl, paramResult.getParams()))
                 .risk(buildRisk(action.getRiskLevel()))
                 .build();
     }
@@ -113,15 +114,20 @@ public class DirectiveBuilderServiceImpl implements DirectiveBuilderService {
                 .build();
     }
 
-    private static ActionInfo buildAction(String targetKind, String openMode, String actionType,
+    private static ActionInfo buildAction(String targetSource, String targetKind, String openMode, String actionType,
                                           String actionUrl, Map<String, String> params) {
         return ActionInfo.builder()
+                .targetSource(targetSource)
                 .targetKind(targetKind)
                 .openMode(openMode)
                 .actionType(actionType)
                 .url(actionUrl)
                 .params(params)
                 .build();
+    }
+
+    private static String resolveTargetSource(CopilotActionConfig action) {
+        return action.getMenuItemId() == null ? "ACTION" : "MENU_ITEM";
     }
 
     private static RiskInfo buildRisk(String riskLevel) {

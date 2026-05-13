@@ -2,7 +2,7 @@ package com.cmbchina.cs.assitsvc.api.controller;
 
 import com.cmbchina.cs.assitsvc.api.dto.CopilotHealthResult;
 import com.cmbchina.cs.assitsvc.config.CopilotConfigCache;
-import com.cmbchina.cs.assitsvc.config.MenuVersionDao;
+import com.cmbchina.cs.assitsvc.config.CopilotConfigRepository;
 import com.cmbchina.cs.assitsvc.core.intent.IntentTreeLoader;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -24,7 +24,7 @@ public class HealthController {
     private final CopilotConfigCache configCache;
     private final IntentTreeLoader intentTreeLoader;
     private final StringRedisTemplate redisTemplate;
-    private final MenuVersionDao menuVersionDao;
+    private final CopilotConfigRepository configRepository;
 
     /**
      * 健康检查。
@@ -60,7 +60,7 @@ public class HealthController {
 
     private String checkDb() {
         try {
-            menuVersionDao.fetchLatestVersionMarker();
+            configRepository.fetchLatestVersionMarker();
             return "UP";
         } catch (Exception e) {
             return "DOWN";

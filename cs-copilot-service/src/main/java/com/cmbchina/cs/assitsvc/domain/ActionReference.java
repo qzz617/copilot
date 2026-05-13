@@ -6,7 +6,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 /**
- * 动作引用，存储于 CLOB copilotIndex.intentToActions 中，含 actionId + priority。
+ * 动作引用，存储于 CopilotConfigSnapshot.intentToActions 中，含 actionId + priority。
  */
 @Data
 @Builder

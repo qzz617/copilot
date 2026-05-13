@@ -4,9 +4,8 @@ import com.cmbchina.cs.assitsvc.core.directive.UrlSecurityProperties;
 import com.cmbchina.cs.assitsvc.core.param.CookiePlaceholderValidator;
 import com.cmbchina.cs.assitsvc.domain.ActionReference;
 import com.cmbchina.cs.assitsvc.domain.CopilotActionConfig;
-import com.cmbchina.cs.assitsvc.domain.CopilotIndex;
+import com.cmbchina.cs.assitsvc.domain.CopilotConfigSnapshot;
 import com.cmbchina.cs.assitsvc.domain.ItemParam;
-import com.cmbchina.cs.assitsvc.domain.MenuVersionData;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -18,7 +17,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Copilot CLOB 基础校验实现。
+ * Copilot 配置基础校验实现。
  */
 @Service
 @RequiredArgsConstructor
@@ -28,41 +27,38 @@ public class CopilotConfigValidationServiceImpl implements CopilotConfigValidati
     private final CookiePlaceholderValidator cookiePlaceholderValidator;
 
     @Override
-    public ConfigValidationResult validate(MenuVersionData data) {
+    public ConfigValidationResult validate(CopilotConfigSnapshot snapshot) {
         List<String> errors = new ArrayList<>();
-        validateRoot(data, errors);
-        if (data != null && data.getCopilotIndex() != null) {
-            validateIndex(data.getCopilotIndex(), errors);
+        validateRoot(snapshot, errors);
+        if (snapshot != null) {
+            validateIndex(snapshot, errors);
         }
         return errors.isEmpty() ? ConfigValidationResult.ok() : ConfigValidationResult.fail(errors);
     }
 
-    private void validateRoot(MenuVersionData data, List<String> errors) {
-        if (data == null) {
-            errors.add("MenuVersionData must not be null");
+    private void validateRoot(CopilotConfigSnapshot snapshot, List<String> errors) {
+        if (snapshot == null) {
+            errors.add("CopilotConfigSnapshot must not be null");
             return;
         }
-        if (!StringUtils.hasText(data.getVersion())) {
-            errors.add("version must not be empty");
+        if (!StringUtils.hasText(snapshot.getVersionId())) {
+            errors.add("versionId must not be empty");
         }
-        if (data.getCopilotIndex() == null) {
-            errors.add("copilotIndex must not be null");
+        if (snapshot.getIntentToActions() == null) {
+            errors.add("intentToActions must not be null");
+        }
+        if (snapshot.getActionById() == null) {
+            errors.add("actionById must not be null");
         }
     }
 
-    private void validateIndex(CopilotIndex index, List<String> errors) {
-        if (index.getIntentToActions() == null) {
-            errors.add("copilotIndex.intentToActions must not be null");
-        }
-        if (index.getActionById() == null) {
-            errors.add("copilotIndex.actionById must not be null");
-        }
-        if (index.getIntentToActions() == null || index.getActionById() == null) {
+    private void validateIndex(CopilotConfigSnapshot snapshot, List<String> errors) {
+        if (snapshot.getIntentToActions() == null || snapshot.getActionById() == null) {
             return;
         }
 
-        for (Map.Entry<String, List<ActionReference>> entry : index.getIntentToActions().entrySet()) {
-            validateIntentMapping(entry.getKey(), entry.getValue(), index.getActionById(), errors);
+        for (Map.Entry<String, List<ActionReference>> entry : snapshot.getIntentToActions().entrySet()) {
+            validateIntentMapping(entry.getKey(), entry.getValue(), snapshot.getActionById(), errors);
         }
     }
 
@@ -113,7 +109,7 @@ public class CopilotConfigValidationServiceImpl implements CopilotConfigValidati
             errors.add("targetKind/openMode missing, actionId=" + actionId);
             return;
         }
-        String pair = targetKind + "/" + openMode;
+        String pair = targetKind.toUpperCase() + "/" + openMode.toUpperCase();
         if (!"URL/CURRENT_TAB".equals(pair)
                 && !"URL/NEW_TAB".equals(pair)
                 && !"ROUTE/CURRENT_TAB".equals(pair)

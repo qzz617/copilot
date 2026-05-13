@@ -16,6 +16,9 @@ import java.util.Map;
 @AllArgsConstructor
 public class ActionInfo {
 
+    /** 目标来源：ACTION / MENU_ITEM */
+    private String targetSource;
+
     /** 打开目标类型：URL / ROUTE / IFRAME / NEW_WINDOW */
     private String targetKind;
 

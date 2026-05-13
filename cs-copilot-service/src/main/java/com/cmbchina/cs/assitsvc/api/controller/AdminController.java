@@ -7,7 +7,7 @@ import com.cmbchina.cs.assitsvc.config.ConfigValidationResult;
 import com.cmbchina.cs.assitsvc.config.CopilotConfigCache;
 import com.cmbchina.cs.assitsvc.config.CopilotConfigValidationService;
 import com.cmbchina.cs.assitsvc.core.intent.IntentTreeLoader;
-import com.cmbchina.cs.assitsvc.domain.MenuVersionData;
+import com.cmbchina.cs.assitsvc.domain.CopilotConfigSnapshot;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.util.StringUtils;
@@ -51,7 +51,7 @@ public class AdminController {
     }
 
     /**
-     * 重新加载当前 Pod 的 CLOB 配置。
+     * 重新加载当前 Pod 的 Copilot 配置。
      *
      * @return 加载结果
      */
@@ -72,13 +72,13 @@ public class AdminController {
     }
 
     /**
-     * 校验待发布的 Copilot CLOB 配置。
+     * 校验待发布的 Copilot 配置快照。
      *
      * @param data 待校验配置
      * @return 校验结果
      */
     @PostMapping("/config/validate")
-    public ApiResult validateConfig(HttpServletRequest request, @RequestBody MenuVersionData data) {
+    public ApiResult validateConfig(HttpServletRequest request, @RequestBody CopilotConfigSnapshot data) {
         authorize(request);
         ConfigValidationResult result = validationService.validate(data);
         if (result.isSuccess()) {
