@@ -6,17 +6,17 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 /**
- * 功能引用，存储于 CLOB copilotIndex.intentToItems 中，含 itemId + priority。
+ * 动作引用，存储于 CLOB copilotIndex.intentToActions 中，含 actionId + priority。
  */
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class ItemReference {
+public class ActionReference {
 
-    /** 功能 ID */
-    private Long itemId;
+    /** Copilot 动作 ID */
+    private String actionId;
 
-    /** 意图-功能映射优先级 */
+    /** 意图-动作映射优先级 */
     private Integer priority;
 }

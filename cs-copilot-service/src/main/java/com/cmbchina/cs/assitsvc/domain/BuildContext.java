@@ -23,8 +23,8 @@ public class BuildContext {
     /** 当前配置版本 */
     private String configVersion;
 
-    /** 候选功能完整配置 */
-    private ItemFullConfig item;
+    /** 候选动作完整配置 */
+    private CopilotActionConfig action;
 
     /** 参数解析上下文 */
     private ParamContext paramContext;

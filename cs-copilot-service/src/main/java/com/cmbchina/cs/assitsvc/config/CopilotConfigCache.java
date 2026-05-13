@@ -1,8 +1,8 @@
 package com.cmbchina.cs.assitsvc.config;
 
 import com.alibaba.fastjson2.JSON;
-import com.cmbchina.cs.assitsvc.domain.ItemFullConfig;
-import com.cmbchina.cs.assitsvc.domain.ItemReference;
+import com.cmbchina.cs.assitsvc.domain.ActionReference;
+import com.cmbchina.cs.assitsvc.domain.CopilotActionConfig;
 import com.cmbchina.cs.assitsvc.domain.MenuVersionData;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -61,39 +61,39 @@ public class CopilotConfigCache {
     }
 
     /**
-     * 按意图代码查找候选功能引用。
+     * 按意图代码查找候选动作引用。
      *
      * @param intentCode 意图代码
-     * @return 候选功能引用列表
+     * @return 候选动作引用列表
      */
-    public List<ItemReference> findCandidatesByIntent(String intentCode) {
+    public List<ActionReference> findCandidatesByIntent(String intentCode) {
         MenuVersionData versionData = currentVersion;
         if (versionData == null || versionData.getCopilotIndex() == null) {
             return Collections.emptyList();
         }
 
-        Map<String, List<ItemReference>> intentToItems = versionData.getCopilotIndex().getIntentToItems();
-        if (intentToItems == null) {
+        Map<String, List<ActionReference>> intentToActions = versionData.getCopilotIndex().getIntentToActions();
+        if (intentToActions == null) {
             return Collections.emptyList();
         }
-        List<ItemReference> refs = intentToItems.get(intentCode);
-        return refs == null ? Collections.<ItemReference>emptyList() : refs;
+        List<ActionReference> refs = intentToActions.get(intentCode);
+        return refs == null ? Collections.<ActionReference>emptyList() : refs;
     }
 
     /**
-     * 查询功能完整配置。
+     * 查询动作完整配置。
      *
-     * @param itemId 功能 ID
-     * @return 功能完整配置；不存在时返回 null
+     * @param actionId 动作 ID
+     * @return 动作完整配置；不存在时返回 null
      */
-    public ItemFullConfig getItemConfig(long itemId) {
+    public CopilotActionConfig getActionConfig(String actionId) {
         MenuVersionData versionData = currentVersion;
         if (versionData == null || versionData.getCopilotIndex() == null) {
             return null;
         }
 
-        Map<String, ItemFullConfig> itemById = versionData.getCopilotIndex().getItemById();
-        return itemById == null ? null : itemById.get(String.valueOf(itemId));
+        Map<String, CopilotActionConfig> actionById = versionData.getCopilotIndex().getActionById();
+        return actionById == null ? null : actionById.get(actionId);
     }
 
     /**
@@ -125,23 +125,23 @@ public class CopilotConfigCache {
         if (versionData == null) {
             return 0;
         }
-        if (versionData.getCopilotIndex() == null || versionData.getCopilotIndex().getIntentToItems() == null) {
+        if (versionData.getCopilotIndex() == null || versionData.getCopilotIndex().getIntentToActions() == null) {
             return 0;
         }
-        return versionData.getCopilotIndex().getIntentToItems().size();
+        return versionData.getCopilotIndex().getIntentToActions().size();
     }
 
     /**
-     * 统计当前启用 Copilot 的功能数量。
+     * 统计当前启用 Copilot 的动作数量。
      *
-     * @return 功能数量
+     * @return 动作数量
      */
-    public int getCopilotEnabledItemCount() {
+    public int getCopilotEnabledActionCount() {
         MenuVersionData versionData = currentVersion;
         if (versionData == null || versionData.getCopilotIndex() == null) {
             return 0;
         }
-        Map<String, ItemFullConfig> itemById = versionData.getCopilotIndex().getItemById();
-        return itemById == null ? 0 : itemById.size();
+        Map<String, CopilotActionConfig> actionById = versionData.getCopilotIndex().getActionById();
+        return actionById == null ? 0 : actionById.size();
     }
 }

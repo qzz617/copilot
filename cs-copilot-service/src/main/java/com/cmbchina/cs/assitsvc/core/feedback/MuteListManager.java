@@ -20,8 +20,8 @@ public class MuteListManager {
 
     private static final String INTENT_KEY_PREFIX = "copilot:mute:{";
     private static final String INTENT_KEY_SUFFIX = "}:intent";
-    private static final String ITEM_KEY_PREFIX = "copilot:mute:{";
-    private static final String ITEM_KEY_SUFFIX = "}:item";
+    private static final String ACTION_KEY_PREFIX = "copilot:mute:{";
+    private static final String ACTION_KEY_SUFFIX = "}:action";
     private static final int CALL_MUTE_TTL_SECONDS = 2 * 3600;
 
     private final StringRedisTemplate redisTemplate;
@@ -34,9 +34,9 @@ public class MuteListManager {
         muteIntent(callId, intentCode, CALL_MUTE_TTL_SECONDS);
     }
 
-    public void muteItemForCall(String callId, Long itemId) {
-        if (itemId != null) {
-            addToSet(itemKey(callId), String.valueOf(itemId), CALL_MUTE_TTL_SECONDS);
+    public void muteActionForCall(String callId, String actionId) {
+        if (StringUtils.hasText(actionId)) {
+            addToSet(actionKey(callId), actionId, CALL_MUTE_TTL_SECONDS);
         }
     }
 
@@ -44,8 +44,8 @@ public class MuteListManager {
         return isMember(intentKey(callId), intentCode);
     }
 
-    public boolean isItemMuted(String callId, Long itemId) {
-        return itemId != null && isMember(itemKey(callId), String.valueOf(itemId));
+    public boolean isActionMuted(String callId, String actionId) {
+        return StringUtils.hasText(actionId) && isMember(actionKey(callId), actionId);
     }
 
     public void cleanup(String callId) {
@@ -53,7 +53,7 @@ public class MuteListManager {
             return;
         }
         try {
-            redisTemplate.delete(Arrays.asList(intentKey(callId), itemKey(callId)));
+            redisTemplate.delete(Arrays.asList(intentKey(callId), actionKey(callId)));
         } catch (DataAccessException e) {
             log.warn("[M11] Redis cleanup mute list failed, callId={}", callId, e);
         }
@@ -87,7 +87,7 @@ public class MuteListManager {
         return INTENT_KEY_PREFIX + callId + INTENT_KEY_SUFFIX;
     }
 
-    private static String itemKey(String callId) {
-        return ITEM_KEY_PREFIX + callId + ITEM_KEY_SUFFIX;
+    private static String actionKey(String callId) {
+        return ACTION_KEY_PREFIX + callId + ACTION_KEY_SUFFIX;
     }
 }

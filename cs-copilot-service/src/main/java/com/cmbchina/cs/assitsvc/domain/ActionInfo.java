@@ -16,10 +16,10 @@ import java.util.Map;
 @AllArgsConstructor
 public class ActionInfo {
 
-    /** 打开目标类型：URL / ROUTE / COMPONENT / IFRAME / NEW_WINDOW */
+    /** 打开目标类型：URL / ROUTE / IFRAME / NEW_WINDOW */
     private String targetKind;
 
-    /** 打开方式：CURRENT_TAB / NEW_TAB / POPUP / DRAWER / WINDOW / IFRAME */
+    /** 打开方式：CURRENT_TAB / NEW_TAB / WINDOW / IFRAME */
     private String openMode;
 
     /** 派生动作类型，前端按此选择执行器，如 OPEN_IFRAME */

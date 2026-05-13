@@ -92,7 +92,7 @@ public class IntentRecognitionTriggerImpl implements IntentRecognitionTrigger {
                     .callId(callId)
                     .operatorId(session.getOperatorId())
                     .configVersion(configCache.getCurrentVersion())
-                    .item(candidate.getConfig())
+                    .action(candidate.getConfig())
                     .paramContext(buildParamContext(session))
                     .build();
             DirectiveDTO directive = directiveBuilderService.build(context, intentResult);
@@ -106,8 +106,8 @@ public class IntentRecognitionTriggerImpl implements IntentRecognitionTrigger {
             }
             return pushed;
         } catch (RuntimeException e) {
-            log.warn("[M09] Build or push directive failed, callId={}, itemId={}",
-                    callId, candidate == null ? null : candidate.getItemId(), e);
+            log.warn("[M09] Build or push directive failed, callId={}, actionId={}",
+                    callId, candidate == null ? null : candidate.getActionId(), e);
             recordBuildFailure(callId, session, intentResult, e);
             return false;
         }

@@ -33,10 +33,12 @@ public class TriggerLogRecord {
     private String intentCode;
     @TableField("intent_name")
     private String intentName;
-    @TableField("item_id")
-    private Long itemId;
-    @TableField("item_name")
-    private String itemName;
+    @TableField("action_id")
+    private String actionId;
+    @TableField("action_name")
+    private String actionName;
+    @TableField("menu_item_id")
+    private Long menuItemId;
     @TableField("candidate_count")
     private Integer candidateCount;
     @TableField("risk_level")
@@ -47,26 +49,12 @@ public class TriggerLogRecord {
     private Instant expireAt;
     @TableField("directive_status")
     private String directiveStatus;
-    @TableField("ai_request_id")
-    private String aiRequestId;
-    @TableField("ai_response_time_ms")
-    private Long aiResponseTimeMs;
-    @TableField("ai_success")
-    private String aiSuccess;
-    @TableField("ai_failure_reason")
-    private String aiFailureReason;
     @TableField("result_status")
     private String resultStatus;
     @TableField("reason_code")
     private String reasonCode;
     @TableField("filter_stage")
     private String filterStage;
-    @TableField("missing_params_json")
-    private String missingParamsJson;
-    @TableField("asr_confidence")
-    private Double asrConfidence;
-    @TableField("asr_text_hash")
-    private String asrTextHash;
     @TableField("trigger_time")
     private Instant triggerTime;
     @TableField("config_version")

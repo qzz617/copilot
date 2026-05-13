@@ -65,7 +65,7 @@ public class FeedbackServiceImpl implements FeedbackService {
                 || !StringUtils.hasText(request.getOperatorId())
                 || !StringUtils.hasText(request.getFeedbackType())
                 || !StringUtils.hasText(request.getIntentCode())
-                || request.getItemId() == null) {
+                || !StringUtils.hasText(request.getActionId())) {
             return FeedbackResult.fail("INVALID_REQUEST", "required field missing");
         }
         if (!isSupportedFeedbackType(request.getFeedbackType())) {
@@ -84,7 +84,7 @@ public class FeedbackServiceImpl implements FeedbackService {
         if (!Objects.equals(triggerLog.getCallId(), request.getCallId())
                 || !Objects.equals(triggerLog.getOperatorId(), request.getOperatorId())
                 || !Objects.equals(triggerLog.getIntentCode(), request.getIntentCode())
-                || !Objects.equals(triggerLog.getItemId(), request.getItemId())) {
+                || !Objects.equals(triggerLog.getActionId(), request.getActionId())) {
             log.warn("[M11] Feedback context mismatch, directiveId={}", request.getDirectiveId());
             return FeedbackResult.fail("CONTEXT_MISMATCH");
         }
@@ -100,7 +100,7 @@ public class FeedbackServiceImpl implements FeedbackService {
         } else if ("WRONG_INTENT".equals(type)) {
             muteListManager.muteIntentForCall(request.getCallId(), request.getIntentCode());
         } else if ("WRONG_FUNCTION".equals(type)) {
-            muteListManager.muteItemForCall(request.getCallId(), request.getItemId());
+            muteListManager.muteActionForCall(request.getCallId(), request.getActionId());
         }
     }
 

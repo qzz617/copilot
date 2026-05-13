@@ -23,14 +23,11 @@ public class IntentMapping {
     /** AI 意图名称（仅展示用） */
     private String standardIntentName;
 
-    /** 关联功能 ID */
-    private Long itemId;
+    /** 关联 Copilot 动作 ID */
+    private String actionId;
 
     /** 同意图多候选优先级，倒序取最高 */
     private Integer mappingPriority;
-
-    /** 附加条件规则 JSON 字符串 */
-    private String conditionRule;
 
     /** 是否启用：Y / N */
     private String enabled;

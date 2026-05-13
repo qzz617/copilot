@@ -6,7 +6,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 /**
- * 功能参数，对应 cs_menu_item_param 中一行记录。
+ * 动作参数，对应快捷导航参数或 cs_copilot_action.param_config_json 中一项。
  */
 @Data
 @Builder

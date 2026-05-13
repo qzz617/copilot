@@ -66,7 +66,7 @@ public class AdminController {
                 .currentVersion(configCache.getCurrentVersion())
                 .loadTimeMs(System.currentTimeMillis() - begin)
                 .intentMappingCount(configCache.getIntentMappingCount())
-                .copilotEnabledItemCount(configCache.getCopilotEnabledItemCount())
+                .copilotEnabledActionCount(configCache.getCopilotEnabledActionCount())
                 .reloadTime(configCache.getLastLoadTime() == null ? null : configCache.getLastLoadTime().toString())
                 .build();
     }

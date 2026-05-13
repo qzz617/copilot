@@ -35,10 +35,10 @@ public class FeedbackLogRecord {
     private String feedbackType;
     @TableField("intent_code")
     private String intentCode;
-    @TableField("item_id")
-    private Long itemId;
-    @TableField("frontend_reason")
-    private String frontendReason;
+    @TableField("action_id")
+    private String actionId;
+    @TableField("menu_item_id")
+    private Long menuItemId;
     @TableField("is_effective")
     private String isEffective;
     @TableField("feedback_time")

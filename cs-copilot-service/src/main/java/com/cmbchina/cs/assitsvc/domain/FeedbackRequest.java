@@ -6,7 +6,6 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import javax.validation.constraints.NotBlank;
-import javax.validation.constraints.NotNull;
 import javax.validation.constraints.Pattern;
 
 /**
@@ -42,9 +41,12 @@ public class FeedbackRequest {
     /** 意图名称 */
     private String intentName;
 
-    /** 功能 ID */
-    @NotNull
-    private Long itemId;
+    /** Copilot 动作 ID */
+    @NotBlank
+    private String actionId;
+
+    /** 可选快捷导航菜单 ID；纯意图唤起动作为空 */
+    private Long menuItemId;
 
     /** 反馈时间，ISO 8601 格式 */
     private String feedbackTime;

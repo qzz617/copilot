@@ -43,15 +43,11 @@ com.cmbchina.cs.assitsvc.domain
 ├── CallSession                # 通话会话
 ├── IntentResult               # 意图识别结果
 ├── IntentTreeNode             # 意图树节点
-├── ItemFullConfig             # 功能完整配置（含 CopilotExt）
-├── CopilotExt                 # Copilot 扩展配置
+├── CopilotActionConfig        # Copilot 动作完整配置
 ├── IntentMapping              # 意图映射
-├── ItemReference              # 功能引用（itemId + priority）
-├── ItemParam                  # 功能参数
-├── ItemCandidate              # 候选项
-├── ConditionRule              # 条件规则
-├── ConditionItem              # 条件项
-├── EvaluationContext          # 评估上下文
+├── ActionReference            # 动作引用（actionId + priority）
+├── ItemParam                  # 动作参数
+├── ItemCandidate              # 候选动作
 ├── ParamContext               # 参数上下文
 ├── BuildContext               # 指令构建上下文
 ├── ExecutedStep               # 已执行步骤
@@ -184,25 +180,9 @@ com.cmbchina.cs.assitsvc.core.param
 **验收标准**：
 - [ ] 枚举值与 DD-V1.2 第 15.1 节一致
 
-### Task U-2：RuleEvaluator
+### Task U-2：条件规则评估
 
-**输入**：DD-V1.2 第 14.3 节
-
-**实现范围**：
-```
-com.cmbchina.cs.assitsvc.core.match
-├── RuleEvaluator              # 接口
-└── JsonRuleEvaluatorImpl      # 实现
-```
-
-**关键约束**：
-- 支持 `eq/not_eq/in/not_in/exists/not_exists/gt/gte/lt/lte`
-- DD-V1.2 P1-19：异常默认返回 false
-- 支持 `all`（AND）和 `any`（OR）组合
-
-**验收标准**：
-- [ ] 所有运算符正确
-- [ ] 异常时返回 false
+当前阶段不实现。`condition_rule` 已从 Copilot 动作表和意图映射表移除，后续如果需要精细条件过滤，再单独恢复规则模型与评估器。
 
 ### Task U-3：UrlBuilder（DD-V1.2 增强）
 
@@ -379,7 +359,7 @@ com.cmbchina.cs.assitsvc.core.match
 **关键约束**：
 - DD-V1.2 P1-9：先过 GrayPolicy（最简：operator 白名单）
 - DD-V1.2 P1-10：mapping_priority 仅在 cs_copilot_intent_mapping 中
-- DD-V1.2 P1-19：condition_rule 异常返回 false
+- 当前阶段不启用 condition_rule，候选过滤只保留启停、灰度、静默、风险等级和参数/URL 校验
 
 **验收标准**：
 - [ ] 单 intentCode 多候选按 priority 倒序
