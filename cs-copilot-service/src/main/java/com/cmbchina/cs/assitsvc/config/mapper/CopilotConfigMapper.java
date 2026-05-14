@@ -1,7 +1,6 @@
 package com.cmbchina.cs.assitsvc.config.mapper;
 
 import com.cmbchina.cs.assitsvc.config.model.CopilotActionRow;
-import com.cmbchina.cs.assitsvc.config.model.CopilotMenuItemParamRow;
 import com.cmbchina.cs.assitsvc.config.model.CopilotMenuItemRow;
 import com.cmbchina.cs.assitsvc.domain.IntentMapping;
 import org.apache.ibatis.annotations.Mapper;
@@ -47,14 +46,4 @@ public interface CopilotConfigMapper {
     })
     List<CopilotMenuItemRow> selectMenuItems(@Param("itemIds") List<Long> itemIds);
 
-    @Select({
-            "<script>",
-            "SELECT item_id AS itemId, param_type AS paramType, param_key AS paramKey, param_value AS paramValue ",
-            "FROM svccfg.cs_menu_item_param WHERE item_id IN ",
-            "<foreach collection='itemIds' item='itemId' open='(' separator=',' close=')'>",
-            "#{itemId}",
-            "</foreach>",
-            "</script>"
-    })
-    List<CopilotMenuItemParamRow> selectMenuItemParams(@Param("itemIds") List<Long> itemIds);
 }

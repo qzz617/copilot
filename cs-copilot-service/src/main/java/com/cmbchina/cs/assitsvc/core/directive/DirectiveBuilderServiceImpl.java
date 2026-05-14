@@ -38,6 +38,10 @@ public class DirectiveBuilderServiceImpl implements DirectiveBuilderService {
         validate(context, intentResult);
 
         CopilotActionConfig action = context.getAction();
+        if (isMenuItemAction(action)) {
+            return buildMenuItemDirective(context, intentResult, action);
+        }
+
         String targetKind = action.getTargetKind();
         String openMode = action.getOpenMode();
         String targetUrl = resolveTargetUrl(action);
@@ -63,6 +67,23 @@ public class DirectiveBuilderServiceImpl implements DirectiveBuilderService {
                 .display(buildDisplay(intentResult, action))
                 .action(buildAction(resolveTargetSource(action), targetKind, openMode, actionType,
                         actionUrl, paramResult.getParams()))
+                .risk(buildRisk(action.getRiskLevel()))
+                .build();
+    }
+
+    private DirectiveDTO buildMenuItemDirective(BuildContext context, IntentResult intentResult,
+                                                CopilotActionConfig action) {
+        return DirectiveDTO.builder()
+                .directiveId(generateDirectiveId())
+                .directiveType("RECOMMENDATION")
+                .callId(context.getCallId())
+                .operatorId(context.getOperatorId())
+                .configVersion(context.getConfigVersion())
+                .expireAt(Instant.now().plusSeconds(Math.max(1, directiveExpireSeconds)).toString())
+                .intent(buildIntent(intentResult))
+                .function(buildFunction(action))
+                .display(buildDisplay(intentResult, action))
+                .action(buildMenuItemAction())
                 .risk(buildRisk(action.getRiskLevel()))
                 .build();
     }
@@ -126,8 +147,19 @@ public class DirectiveBuilderServiceImpl implements DirectiveBuilderService {
                 .build();
     }
 
+    private static ActionInfo buildMenuItemAction() {
+        return ActionInfo.builder()
+                .targetSource("MENU_ITEM")
+                .actionType("OPEN_MENU_ITEM")
+                .build();
+    }
+
     private static String resolveTargetSource(CopilotActionConfig action) {
         return action.getMenuItemId() == null ? "ACTION" : "MENU_ITEM";
+    }
+
+    private static boolean isMenuItemAction(CopilotActionConfig action) {
+        return action.getMenuItemId() != null;
     }
 
     private static RiskInfo buildRisk(String riskLevel) {

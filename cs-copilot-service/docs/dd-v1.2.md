@@ -1658,14 +1658,7 @@ public class ParamResolver {
 
   "action": {
     "targetSource": "MENU_ITEM",
-    "targetKind": "IFRAME",
-    "openMode": "IFRAME",
-    "actionType": "OPEN_IFRAME",
-    "url": "https://frdctrfront.paasuat.cmbchina.cn/...?custNo=C123&token=${COOKIE.token}",
-    "params": {
-      "custNo": "C123",
-      "token": "${COOKIE.token}"
-    }
+    "actionType": "OPEN_MENU_ITEM"
   },
 
   "risk": {
@@ -2643,14 +2636,14 @@ CREATE INDEX idx_copilot_action_menu_item
 | floating_tip_text | varchar(256) | 否 | 跳转前提示 |
 | risk_level | varchar(16) | 是 | LOW / MEDIUM / HIGH / DISABLED，默认 LOW |
 | icon_url | varchar(256) | 否 | 图标 URL |
-| param_config_json | text | 否 | 纯 action 参数配置；关联菜单项时以 `cs_menu_item_param` 为准 |
+| param_config_json | text | 否 | 纯 action 参数配置；关联菜单项时不使用 |
 | created_by / created_name / created_time | - | 是 | 创建审计 |
 | updated_by / updated_name / updated_time | - | 否 | 更新审计 |
 
 #### 关联菜单项时的取值规则
 
 - `menu_item_id` 为空：运行时使用 action 自身的 `target_kind/open_mode/target_url/route_path/param_config_json`。
-- `menu_item_id` 不为空：运行时以 `cs_menu_item.url`、`cs_menu_item_param` 等菜单配置为准；action 目标字段可留空，也可保存为快照，不能作为实际跳转事实来源。若 `target_kind/open_mode` 留空，服务默认按 `URL/CURRENT_TAB` 构建指令。
+- `menu_item_id` 不为空：运行时指令只携带 `menuItemId` 和 `targetSource=MENU_ITEM`，由前端复用现有快捷导航打开逻辑；action 目标字段可留空，也可保存为快照，不能作为实际跳转事实来源。
 - `item_snapshot_json` 不为空时，发布校验需比较快照与当前菜单项是否一致。
 - action 与菜单项不加外键。菜单项删除、禁用、字段不一致由发布校验阻断；运行时刷新遇到异常配置时整版刷新失败并保留上一版快照。
 
@@ -2913,7 +2906,7 @@ Copilot 配置来源：
   - cs_copilot_config_version
   - cs_copilot_action
   - cs_copilot_intent_mapping
-  - cs_menu_item / cs_menu_item_param（仅 menu_item_id 不为空时读取）
+  - cs_menu_item（仅 menu_item_id 不为空时读取，用于存在性、启用状态和快照一致性校验）
 
 运行时缓存：
   - 各 Pod 本地持有不可变 CopilotConfigSnapshot
@@ -2952,7 +2945,7 @@ Copilot 配置来源：
 | 值 | 含义 |
 |----|------|
 | ACTION | 纯 Copilot action，目标从 `cs_copilot_action` 读取 |
-| MENU_ITEM | 关联快捷导航菜单项，目标从 `cs_menu_item` 读取 |
+| MENU_ITEM | 关联快捷导航菜单项，前端根据 `menuItemId` 调用现有快捷导航打开逻辑 |
 
 ### 22.3 配置刷新流程
 
@@ -2963,7 +2956,7 @@ flowchart TD
     C -- 否 --> D[继续使用本地快照]
     C -- 是 --> E[读取启用的 cs_copilot_action]
     E --> F[读取启用的 cs_copilot_intent_mapping]
-    F --> G[按需读取 cs_menu_item / cs_menu_item_param]
+    F --> G[按需读取 cs_menu_item]
     G --> H[执行配置校验]
     H --> I{校验是否通过}
     I -- 是 --> J[构建并替换本地 CopilotConfigSnapshot]
@@ -2975,9 +2968,9 @@ flowchart TD
 | 场景 | 运行时目标来源 | 参数来源 | action 目标字段用途 |
 |------|---------------|----------|--------------------|
 | `menu_item_id` 为空 | `cs_copilot_action` | `param_config_json` | 必填，作为事实来源 |
-| `menu_item_id` 不为空 | `cs_menu_item` | `cs_menu_item_param` | 可为空或作为快照，不作为事实来源；`target_kind/open_mode` 空时默认 URL/CURRENT_TAB |
+| `menu_item_id` 不为空 | 前端现有快捷导航逻辑 | 快捷导航既有逻辑 | 可为空或作为快照，不作为事实来源 |
 
-关联菜单项时，前端指令应优先携带 `menuItemId`，由前端复用现有快捷导航打开逻辑。如果前端不能仅凭 `menuItemId` 打开，则服务端需要从 `cs_menu_item` 补齐 `url/page_id/page_title/sys_flag` 等字段，但这些字段仍以菜单表为准。
+关联菜单项时，前端指令只携带 `menuItemId`，由前端复用现有快捷导航打开逻辑。服务端不把 `cs_menu_item.url/page_id/page_title/sys_flag` 翻译成 Copilot 跳转字段。
 
 ### 22.5 校验规则
 
@@ -2988,29 +2981,28 @@ flowchart TD
 | action 启用状态 | `enabled='Y'` | `enabled='Y'` |
 | 意图映射 | mapping 必须引用存在且启用的 action | 同左 |
 | 目标字段 | `target_kind/open_mode` 必填，并校验组合合法 | 不要求 action 目标字段必填 |
-| URL 白名单 | URL / IFRAME / NEW_WINDOW 必须命中白名单 | 如果菜单项输出 URL，也需命中白名单 |
+| URL 白名单 | URL / IFRAME / NEW_WINDOW 必须命中白名单 | 不校验，沿用现有快捷导航打开链路 |
 | 菜单项存在性 | 不校验 | `cs_menu_item.item_id` 必须存在 |
-| 菜单项启用状态 | 不校验 | `cs_menu_item.enabled` 必须为启用 |
+| 菜单项启用状态 | 不校验 | `cs_menu_item.enabled` 必须为 `Y` |
 | 快照一致性 | 不校验 | `item_snapshot_json` 不为空时比较 itemName/url/sysFlag/pageId/pageTitle/enabled |
-| 参数来源 | 校验 `param_config_json` 格式 | 校验 `cs_menu_item_param` 配置可解析 |
+| 参数来源 | 校验 `param_config_json` 格式 | 不校验，沿用现有快捷导航打开链路 |
 
 校验失败策略：
 
 - 配置后台发布时：阻断发布，返回具体错误。
 - 服务运行时刷新时：保留上一版有效快照；如果只存在少量失效 action，可按配置决定整版失败或跳过失效 action。MVP 建议整版失败，避免各 Pod 看到不同候选集。
 
-### 22.6 待澄清问题
+### 22.6 已确认与待澄清问题
 
 | 编号 | 问题 | 建议默认值 |
 |------|------|------------|
-| Q1 | 前端是否支持仅凭 `menuItemId` 调用现有快捷导航打开逻辑？ | 如果支持，指令只传 `menuItemId`；如果不支持，后端从 `cs_menu_item` 补齐打开字段 |
-| Q2 | `cs_menu_item.enabled` 的真实启用值是什么？ | 需要确认是 `Y/N`、`1/0` 还是其他编码 |
-| Q3 | 关联 item 时是否必须校验 `cs_menu_item_param`？ | 建议校验可解析，但不强制所有参数都有值 |
-| Q4 | `item_snapshot_json` 是否必填？ | 建议非必填；需要审计和防漂移时再启用 |
-| Q5 | 菜单项变化后是否自动触发 Copilot 版本发布？ | 建议触发；否则 Copilot 可能继续使用旧快照直到下一次手工发布 |
-| Q6 | 运行时发现单个 action 关联 item 失效时，是整版失败还是跳过单个 action？ | MVP 建议整版失败，保障一致性 |
-| Q7 | 纯 action 的 `target_kind/open_mode` 是否允许继续扩展 COMPONENT/POPUP/DRAWER？ | 本期建议只支持 URL / ROUTE / IFRAME / NEW_WINDOW |
-| Q8 | 纯 action 没有 `menuItemId` 时，前端业务权限如何判断？ | 建议本期通过 Copilot 配置、灰度白名单和目标 URL 白名单控制；若需细粒度权限，新增 action 级权限模型 |
+| C1 | 前端是否支持仅凭 `menuItemId` 调用现有快捷导航打开逻辑？ | 已确认支持；关联 item 时指令只传 `menuItemId` |
+| C2 | `cs_menu_item.enabled` 的真实启用值是什么？ | 已确认启用值为 `Y` |
+| Q1 | `item_snapshot_json` 是否必填？ | 建议非必填；需要审计和防漂移时再启用 |
+| Q2 | 菜单项变化后是否自动触发 Copilot 版本发布？ | 建议触发；否则 Copilot 可能继续使用旧快照直到下一次手工发布 |
+| Q3 | 运行时发现单个 action 关联 item 失效时，是整版失败还是跳过单个 action？ | MVP 建议整版失败，保障一致性 |
+| Q4 | 纯 action 的 `target_kind/open_mode` 是否允许继续扩展 COMPONENT/POPUP/DRAWER？ | 本期建议只支持 URL / ROUTE / IFRAME / NEW_WINDOW |
+| Q5 | 纯 action 没有 `menuItemId` 时，前端业务权限如何判断？ | 建议本期通过 Copilot 配置、灰度白名单和目标 URL 白名单控制；若需细粒度权限，新增 action 级权限模型 |
 
 ---
 
@@ -3070,14 +3062,7 @@ flowchart TD
 
   "action": {
     "targetSource": "MENU_ITEM",
-    "targetKind": "IFRAME",
-    "openMode": "IFRAME",
-    "actionType": "OPEN_IFRAME",
-    "url": "https://frdctrfront.paasuat.cmbchina.cn/page?custNo=C20120315000123&token=${COOKIE.token}",
-    "params": {
-      "custNo": "C20120315000123",
-      "token": "${COOKIE.token}"
-    }
+    "actionType": "OPEN_MENU_ITEM"
   },
 
   "risk": {
@@ -3109,7 +3094,7 @@ flowchart TD
 | action.targetSource | string | 是 | ACTION / MENU_ITEM |
 | action.targetKind | string | 条件必填 | ACTION 场景必填；URL/ROUTE/IFRAME/NEW_WINDOW |
 | action.openMode | string | 条件必填 | ACTION 场景必填；CURRENT_TAB/NEW_TAB/WINDOW/IFRAME |
-| action.actionType | string | 是 | 派生字段，前端按此选择执行器 |
+| action.actionType | string | 是 | 派生字段，前端按此选择执行器；MENU_ITEM 场景为 OPEN_MENU_ITEM |
 | action.url | string | 否 | 含 `${COOKIE.xxx}` 占位符的 URL |
 | action.params | object | 否 | 参数 map（值含 `${COOKIE.xxx}`） |
 | risk.riskLevel | string | 是 | LOW/MEDIUM/HIGH |
@@ -3475,7 +3460,7 @@ sequenceDiagram
 
     Pub->>DB: 读取 cs_copilot_action WHERE enabled='Y'
     Pub->>DB: 读取 cs_copilot_intent_mapping WHERE enabled='Y'
-    Pub->>DB: 按需读取 cs_menu_item / cs_menu_item_param
+    Pub->>DB: 按需读取 cs_menu_item
 
     Pub->>Pub: 执行 action / mapping / item 一致性校验
     Pub->>DB: INSERT INTO cs_copilot_config_version
@@ -4430,7 +4415,7 @@ F03/F04/F06/F07/F08/F09/F11/F12 详细规划与 DD-V1.0 一致，扩展接入路
 
 #### P2-13：CLOB itemById 中 params 敏感
 
-**调整后结论**：Copilot 配置不再写入 `cs_menu_version.config_data`，也不再生成 `copilotIndex.itemById`。纯 action 参数来自 `cs_copilot_action.param_config_json`，关联菜单项参数来自 `cs_menu_item_param`，运行时仍不在配置快照中保存真实客户数据。
+**调整后结论**：Copilot 配置不再写入 `cs_menu_version.config_data`，也不再生成 `copilotIndex.itemById`。纯 action 参数来自 `cs_copilot_action.param_config_json`；关联菜单项时指令只传 `menuItemId`，由前端复用现有快捷导航打开逻辑，运行时不在 Copilot 配置快照中保存真实客户数据。
 
 #### P2-14：通话结束依赖前端 unbind
 

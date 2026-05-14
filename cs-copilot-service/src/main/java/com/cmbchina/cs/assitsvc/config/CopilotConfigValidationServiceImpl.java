@@ -93,6 +93,10 @@ public class CopilotConfigValidationServiceImpl implements CopilotConfigValidati
             errors.add("action.actionName must not be empty, actionId=" + action.getActionId());
         }
 
+        if (action.getMenuItemId() != null) {
+            return;
+        }
+
         validateActionCombination(action.getActionId(), action.getTargetKind(), action.getOpenMode(), errors);
 
         String targetUrl = resolveTargetUrl(action);

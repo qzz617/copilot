@@ -470,7 +470,7 @@ com.cmbchina.cs.assitsvc.config
 - 不改动 `cs_menu_version.config_data`
 - 发布 `cs_copilot_config_version`
 - 从 `cs_copilot_action`、`cs_copilot_intent_mapping` 构建运行时快照
-- 关联 `menu_item_id` 时读取 `cs_menu_item` / `cs_menu_item_param` 做一致性校验
+- 关联 `menu_item_id` 时读取 `cs_menu_item` 做存在性、启用状态和快照一致性校验
 - DD-V1.2 P1-8：发布前基础校验
 
 **协调对象**：Copilot 配置后台团队；若关联菜单项，需要与菜单配置团队确认启用值和打开方式契约

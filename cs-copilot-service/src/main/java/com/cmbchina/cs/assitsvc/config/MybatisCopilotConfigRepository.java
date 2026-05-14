@@ -4,7 +4,6 @@ import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
 import com.cmbchina.cs.assitsvc.config.mapper.CopilotConfigMapper;
 import com.cmbchina.cs.assitsvc.config.model.CopilotActionRow;
-import com.cmbchina.cs.assitsvc.config.model.CopilotMenuItemParamRow;
 import com.cmbchina.cs.assitsvc.config.model.CopilotMenuItemRow;
 import com.cmbchina.cs.assitsvc.domain.ActionReference;
 import com.cmbchina.cs.assitsvc.domain.CopilotActionConfig;
@@ -55,11 +54,10 @@ public class MybatisCopilotConfigRepository implements CopilotConfigRepository {
                 .filter(id -> id != null)
                 .collect(Collectors.toCollection(LinkedHashSet::new));
         Map<Long, CopilotMenuItemRow> menuItems = loadMenuItems(menuItemIds);
-        Map<Long, List<ItemParam>> menuParams = loadMenuItemParams(menuItemIds);
 
         Map<String, CopilotActionConfig> actionById = new LinkedHashMap<>();
         for (CopilotActionRow row : actionRows) {
-            CopilotActionConfig action = toActionConfig(row, menuItems, menuParams);
+            CopilotActionConfig action = toActionConfig(row, menuItems);
             actionById.put(action.getActionId(), action);
         }
 
@@ -85,43 +83,15 @@ public class MybatisCopilotConfigRepository implements CopilotConfigRepository {
         return result;
     }
 
-    private Map<Long, List<ItemParam>> loadMenuItemParams(Set<Long> menuItemIds) {
-        if (menuItemIds.isEmpty()) {
-            return Collections.emptyMap();
-        }
-        List<CopilotMenuItemParamRow> rows = defaultList(
-                configMapper.selectMenuItemParams(new ArrayList<>(menuItemIds)));
-        Map<Long, List<ItemParam>> result = new LinkedHashMap<>();
-        for (CopilotMenuItemParamRow row : rows) {
-            List<ItemParam> params = result.get(row.getItemId());
-            if (params == null) {
-                params = new ArrayList<>();
-                result.put(row.getItemId(), params);
-            }
-            params.add(ItemParam.builder()
-                    .paramType(row.getParamType())
-                    .paramKey(row.getParamKey())
-                    .paramValue(row.getParamValue())
-                    .build());
-        }
-        return result;
-    }
-
     private CopilotActionConfig toActionConfig(CopilotActionRow row,
-                                               Map<Long, CopilotMenuItemRow> menuItems,
-                                               Map<Long, List<ItemParam>> menuParams) {
+                                               Map<Long, CopilotMenuItemRow> menuItems) {
         CopilotMenuItemRow menuItem = null;
         if (row.getMenuItemId() != null) {
             menuItem = menuItems.get(row.getMenuItemId());
             validateMenuBinding(row, menuItem);
         }
 
-        String targetKind = normalizeTargetKind(row, menuItem);
-        String openMode = normalizeOpenMode(row, menuItem);
-        String targetUrl = menuItem == null ? row.getTargetUrl() : menuItem.getUrl();
-        List<ItemParam> params = menuItem == null
-                ? parseParamConfig(row.getParamConfigJson())
-                : menuParams.get(row.getMenuItemId());
+        List<ItemParam> params = menuItem == null ? parseParamConfig(row.getParamConfigJson()) : null;
 
         return CopilotActionConfig.builder()
                 .actionId(row.getActionId())
@@ -130,9 +100,9 @@ public class MybatisCopilotConfigRepository implements CopilotConfigRepository {
                 .actionName(row.getActionName())
                 .enabled(isEnabled(row.getEnabled()))
                 .functionPath(row.getFunctionPath())
-                .targetKind(targetKind)
-                .openMode(openMode)
-                .targetUrl(targetUrl)
+                .targetKind(row.getTargetKind())
+                .openMode(row.getOpenMode())
+                .targetUrl(row.getTargetUrl())
                 .routePath(row.getRoutePath())
                 .windowFeature(row.getWindowFeature())
                 .aiDisplayText(row.getAiDisplayText())
@@ -174,20 +144,6 @@ public class MybatisCopilotConfigRepository implements CopilotConfigRepository {
             throw new IllegalStateException("menu item snapshot mismatch, actionId=" + row.getActionId()
                     + ", menuItemId=" + row.getMenuItemId() + ", field=" + field);
         }
-    }
-
-    private String normalizeTargetKind(CopilotActionRow row, CopilotMenuItemRow menuItem) {
-        if (StringUtils.hasText(row.getTargetKind())) {
-            return row.getTargetKind();
-        }
-        return menuItem == null ? null : "URL";
-    }
-
-    private String normalizeOpenMode(CopilotActionRow row, CopilotMenuItemRow menuItem) {
-        if (StringUtils.hasText(row.getOpenMode())) {
-            return row.getOpenMode();
-        }
-        return menuItem == null ? null : "CURRENT_TAB";
     }
 
     private List<ItemParam> parseParamConfig(String paramConfigJson) {
@@ -232,13 +188,7 @@ public class MybatisCopilotConfigRepository implements CopilotConfigRepository {
         if (!StringUtils.hasText(enabled)) {
             return false;
         }
-        String value = enabled.trim();
-        return "Y".equalsIgnoreCase(value)
-                || "1".equals(value)
-                || "T".equalsIgnoreCase(value)
-                || "TRUE".equalsIgnoreCase(value)
-                || "YES".equalsIgnoreCase(value)
-                || "ON".equalsIgnoreCase(value);
+        return "Y".equalsIgnoreCase(enabled.trim());
     }
 
     private static <T> List<T> defaultList(List<T> list) {
