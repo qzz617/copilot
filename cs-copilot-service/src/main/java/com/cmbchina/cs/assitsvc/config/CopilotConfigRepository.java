@@ -20,4 +20,12 @@ public interface CopilotConfigRepository {
      * @return 运行时配置快照
      */
     CopilotConfigSnapshot loadLatestSnapshot();
+
+    /**
+     * 从配置表加载指定版本配置并构建运行时快照。
+     *
+     * @param versionId 配置版本号
+     * @return 运行时配置快照
+     */
+    CopilotConfigSnapshot loadSnapshot(String versionId);
 }

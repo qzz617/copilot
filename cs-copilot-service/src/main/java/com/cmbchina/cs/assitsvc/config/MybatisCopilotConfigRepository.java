@@ -42,12 +42,17 @@ public class MybatisCopilotConfigRepository implements CopilotConfigRepository {
     @Override
     public CopilotConfigSnapshot loadLatestSnapshot() {
         String versionId = fetchLatestVersionMarker();
+        return loadSnapshot(versionId);
+    }
+
+    @Override
+    public CopilotConfigSnapshot loadSnapshot(String versionId) {
         if (!StringUtils.hasText(versionId)) {
-            throw new IllegalStateException("Latest copilot config version is empty");
+            throw new IllegalStateException("Copilot config version is empty");
         }
 
-        List<CopilotActionRow> actionRows = defaultList(configMapper.selectEnabledActions());
-        List<IntentMapping> mappings = defaultList(configMapper.selectEnabledMappings());
+        List<CopilotActionRow> actionRows = defaultList(configMapper.selectEnabledActions(versionId));
+        List<IntentMapping> mappings = defaultList(configMapper.selectEnabledMappings(versionId));
 
         Set<Long> menuItemIds = actionRows.stream()
                 .map(CopilotActionRow::getMenuItemId)

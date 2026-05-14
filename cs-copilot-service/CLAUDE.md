@@ -178,7 +178,7 @@ DD-V1.2 中的模块编号 M01-M17 是**业务编号**，不是开发顺序。�
 | **阶段 0** | 脚手架 | `pom.xml`, `application.yml`, `CopilotApplication.java` |
 | **阶段 1** | 领域模型 | `domain/` 包下所有 POJO（DTO 类） |
 | **阶段 2** | 基础设施 | Redis 配置、Feign 配置、Kafka 配置 |
-| **阶段 3** | 工具类 | `StandardParamType`, `RuleEvaluator`, `UrlBuilder` |
+| **阶段 3** | 工具类 | `StandardParamType`, `UrlBuilder` |
 | **阶段 4** | 单功能模块 | M03 历史 + M04 callSession + M05 意图树 |
 | **阶段 5** | 核心链路 | M01 → M02 → M06 → M07 → M08 → M09 → M10 |
 | **阶段 6** | 闭环模块 | M11 反馈 + M16 监控 + M17 配置一致性 |

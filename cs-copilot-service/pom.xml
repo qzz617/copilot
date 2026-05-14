@@ -108,13 +108,13 @@
             <version>${resilience4j.version}</version>
         </dependency>
 
-        <!-- ============= 数据库（MyBatis-Plus 连接 cs_menu_* 等存量表） ============= -->
+        <!-- ============= 数据库（MyBatis-Plus 连接 TDSQL PG 兼容库中的 cs_menu_* 等表） ============= -->
         <dependency>
             <groupId>com.baomidou</groupId>
             <artifactId>mybatis-plus-boot-starter</artifactId>
             <version>${mybatis-plus.version}</version>
         </dependency>
-        <!-- 由团队 DBA 确认实际数据库类型，此处用 PostgreSQL 占位 -->
+        <!-- TDSQL PG 兼容协议使用 PostgreSQL JDBC 驱动 -->
         <dependency>
             <groupId>org.postgresql</groupId>
             <artifactId>postgresql</artifactId>

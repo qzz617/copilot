@@ -16,23 +16,23 @@ import java.util.List;
 public interface CopilotConfigMapper {
 
     @Select("SELECT version_id FROM svccfg.cs_copilot_config_version "
-            + "WHERE publish_status = 'PUBLISHED' ORDER BY created_time DESC LIMIT 1")
+            + "WHERE publish_status = 'PUBLISHED' ORDER BY created_time DESC, version_id DESC LIMIT 1")
     String selectLatestPublishedVersion();
 
-    @Select("SELECT action_id AS actionId, menu_item_id AS menuItemId, "
+    @Select("SELECT version_id AS versionId, action_id AS actionId, menu_item_id AS menuItemId, "
             + "item_snapshot_json AS itemSnapshotJson, action_name AS actionName, enabled, "
             + "function_path AS functionPath, target_kind AS targetKind, open_mode AS openMode, "
             + "target_url AS targetUrl, route_path AS routePath, window_feature AS windowFeature, "
             + "ai_display_text AS aiDisplayText, floating_tip_text AS floatingTipText, "
             + "risk_level AS riskLevel, icon_url AS iconUrl, param_config_json AS paramConfigJson "
-            + "FROM svccfg.cs_copilot_action WHERE enabled = 'Y'")
-    List<CopilotActionRow> selectEnabledActions();
+            + "FROM svccfg.cs_copilot_action WHERE version_id = #{versionId} AND enabled = 'Y'")
+    List<CopilotActionRow> selectEnabledActions(@Param("versionId") String versionId);
 
-    @Select("SELECT mapping_id AS mappingId, standard_intent_code AS standardIntentCode, "
+    @Select("SELECT version_id AS versionId, mapping_id AS mappingId, standard_intent_code AS standardIntentCode, "
             + "standard_intent_name AS standardIntentName, action_id AS actionId, "
             + "mapping_priority AS mappingPriority, enabled "
-            + "FROM svccfg.cs_copilot_intent_mapping WHERE enabled = 'Y'")
-    List<IntentMapping> selectEnabledMappings();
+            + "FROM svccfg.cs_copilot_intent_mapping WHERE version_id = #{versionId} AND enabled = 'Y'")
+    List<IntentMapping> selectEnabledMappings(@Param("versionId") String versionId);
 
     @Select({
             "<script>",

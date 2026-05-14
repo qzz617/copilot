@@ -8,7 +8,7 @@
 - Spring Boot 2.7.18
 - Spring Cloud OpenFeign（外部接口）
 - Spring Kafka（ASR 消息消费）
-- Jedis（Redis 客户端）
+- Spring Data Redis（RedisTemplate）
 - FastJSON 2.x（JSON 序列化）
 - Resilience4j（熔断保护）
 - Lombok
@@ -21,7 +21,7 @@
 - Maven 3.6+
 - Redis 集群（开发环境可用单机）
 - Kafka（开发环境可用单机）
-- PostgreSQL（占位，由 DBA 确认实际数据库类型）
+- TDSQL（PG 兼容协议）
 
 ### 本地运行
 
@@ -74,7 +74,7 @@ com.cmbchina.cs.assitsvc
 
 ## 数据库
 
-- 4 张新增表，DDL 见 `sql/V1__init.sql`
+- 5 张新增表，DDL 见 `sql/V1__init.sql`
 - 复用存量 `cs_menu_*` 表（结构不变）
 
 ## API 接口
@@ -85,6 +85,7 @@ com.cmbchina.cs.assitsvc
 | `POST /copilot/session/bind` | 来电弹屏绑定 |
 | `POST /copilot/session/unbind` | 通话结束解绑 |
 | `POST /copilot/admin/config/refresh` | 配置刷新 |
+| `POST /copilot/admin/config/validate` | 配置校验 |
 | `POST /copilot/admin/intent-tree/reload` | 意图树重新加载 |
 | `GET /copilot/health` | 健康检查 |
 

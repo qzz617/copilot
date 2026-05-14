@@ -1443,7 +1443,7 @@ public enum StandardParamType {
 #### 配置示例
 
 ```
-某功能配置 cs_menu_item_param 中：
+某个纯 action 的 `cs_copilot_action.param_config_json` 中：
   param_type=COOKIE_PLACEHOLDER
   param_key=token        （URL 参数名）
   param_value=token      （cookie 字段名）
@@ -1572,7 +1572,7 @@ flowchart LR
 public class ParamResolver {
 
     /**
-     * 根据 cs_menu_item_param 列表解析最终参数 map
+     * 根据 cs_copilot_action.param_config_json 列表解析最终参数 map
      */
     public Map<String, String> resolveParams(
             List<ItemParam> paramList,
@@ -2489,7 +2489,7 @@ window.addEventListener('callEnd', () => {
 Copilot 与菜单的关系：
 
 - `cs_copilot_action.menu_item_id` 可为空。为空时表示纯 Copilot action，跳转目标由 action 自身配置提供。
-- `cs_copilot_action.menu_item_id` 不为空时表示复用快捷导航菜单项。运行时以 `cs_menu_item` 及其参数配置为准，action 中的 item 快照只用于校验、审计和运营展示。
+- `cs_copilot_action.menu_item_id` 不为空时表示复用快捷导航菜单项。运行时指令只携带 `menuItemId`，由前端复用现有快捷导航打开逻辑；action 中的 item 快照只用于校验、审计和运营展示。
 - 不使用数据库外键。关联关系由配置发布校验和服务启动/刷新校验保证，避免 Copilot 配置表强绑定菜单表生命周期。
 - `cs_menu_version.config_data` 继续由菜单发布流程维护，Copilot 不修改该 JSON 结构。
 
@@ -2514,6 +2514,7 @@ erDiagram
     }
 
     cs_copilot_action {
+        varchar version_id PK
         varchar action_id PK
         numeric menu_item_id
         text item_snapshot_json
@@ -2529,6 +2530,7 @@ erDiagram
     }
 
     cs_copilot_intent_mapping {
+        varchar version_id PK
         varchar mapping_id PK
         varchar standard_intent_code
         varchar standard_intent_name
@@ -2568,10 +2570,11 @@ erDiagram
 
 ```sql
 CREATE TABLE svccfg.cs_copilot_action (
+    version_id              varchar(32) NOT NULL,
     action_id               varchar(64) NOT NULL,
 
     -- 可选快捷导航关联，不加外键
-    menu_item_id            numeric(131089,0),
+    menu_item_id            numeric(20,0),
     item_snapshot_json      text,
 
     -- 动作基本信息
@@ -2607,22 +2610,23 @@ CREATE TABLE svccfg.cs_copilot_action (
     updated_name            varchar(40),
     updated_time            timestamp,
 
-    CONSTRAINT cs_copilot_action_pkey PRIMARY KEY (action_id)
+    CONSTRAINT cs_copilot_action_pkey PRIMARY KEY (version_id, action_id)
 );
 
-CREATE INDEX idx_copilot_action_enabled
-    ON svccfg.cs_copilot_action(enabled);
+CREATE INDEX idx_copilot_action_version_enabled
+    ON svccfg.cs_copilot_action(version_id, enabled);
 
 CREATE INDEX idx_copilot_action_menu_item
-    ON svccfg.cs_copilot_action(menu_item_id);
+    ON svccfg.cs_copilot_action(version_id, menu_item_id);
 ```
 
 #### 字段说明
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
+| version_id | varchar(32) | 是 | Copilot 配置版本号；action 行按版本快照化保存 |
 | action_id | varchar(64) | 是 | Copilot 动作主键，业务稳定 ID |
-| menu_item_id | numeric(131089,0) | 否 | 可选关联 `cs_menu_item.item_id`，无外键 |
+| menu_item_id | numeric(20,0) | 否 | 可选关联 `cs_menu_item.item_id`，无外键 |
 | item_snapshot_json | text | 否 | 关联菜单项时的快照，用于校验、审计和运营展示，不作为运行时事实来源 |
 | action_name | varchar(128) | 是 | Copilot 动作名称 |
 | enabled | char(1) | 是 | Y/N |
@@ -2653,6 +2657,7 @@ CREATE INDEX idx_copilot_action_menu_item
 
 ```sql
 CREATE TABLE svccfg.cs_copilot_intent_mapping (
+    version_id              varchar(32) NOT NULL,
     mapping_id              varchar(64) NOT NULL,
 
     -- AI 意图
@@ -2676,25 +2681,26 @@ CREATE TABLE svccfg.cs_copilot_intent_mapping (
     updated_name            varchar(40),
     updated_time            timestamp,
 
-    CONSTRAINT cs_copilot_intent_mapping_pkey PRIMARY KEY (mapping_id),
-    CONSTRAINT uq_intent_action UNIQUE (standard_intent_code, action_id)
+    CONSTRAINT cs_copilot_intent_mapping_pkey PRIMARY KEY (version_id, mapping_id),
+    CONSTRAINT uq_intent_action UNIQUE (version_id, standard_intent_code, action_id)
 );
 
 CREATE INDEX idx_intent_mapping_intent
-    ON svccfg.cs_copilot_intent_mapping(standard_intent_code, enabled);
+    ON svccfg.cs_copilot_intent_mapping(version_id, standard_intent_code, enabled);
 
 CREATE INDEX idx_intent_mapping_action
-    ON svccfg.cs_copilot_intent_mapping(action_id);
+    ON svccfg.cs_copilot_intent_mapping(version_id, action_id);
 ```
 
 #### 字段说明
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
+| version_id | varchar(32) | 是 | Copilot 配置版本号；mapping 行按版本快照化保存 |
 | mapping_id | varchar(64) | 是 | UUID |
 | standard_intent_code | varchar(64) | 是 | AI 接口的 intentCode（字符串，如 INTENT_BILL_QUERY） |
 | standard_intent_name | varchar(256) | 否 | 意图名称（仅展示用） |
-| action_id | varchar(64) | 是 | 关联 `cs_copilot_action.action_id`，无外键 |
+| action_id | varchar(64) | 是 | 关联同一 `version_id` 下的 `cs_copilot_action.action_id`，无外键 |
 | mapping_priority | numeric(5,0) | 否 | 同 intentCode 多候选优先级 |
 | enabled | char(1) | 是 | Y/N |
 
@@ -2717,7 +2723,7 @@ CREATE TABLE svccfg.cs_copilot_config_version (
 );
 
 CREATE INDEX idx_copilot_config_version_time
-    ON svccfg.cs_copilot_config_version(created_time);
+    ON svccfg.cs_copilot_config_version(publish_status, created_time);
 ```
 
 #### 字段说明
@@ -2729,7 +2735,7 @@ CREATE INDEX idx_copilot_config_version_time
 | change_summary | varchar(512) | 否 | 发布说明 |
 | created_by / created_name / created_time | - | 是 | 发布审计 |
 
-服务各 Pod 轮询该表最新 `version_id`。版本变化后重新读取 action、intent mapping 以及必要的菜单项配置，并在本地构建不可变快照。
+服务各 Pod 轮询该表最新 `version_id`。版本变化后按该 `version_id` 重新读取 action、intent mapping 以及必要的菜单项配置，并在本地构建不可变快照。发布流程应先写入同一 `version_id` 的 action/mapping 快照行，校验通过后最后插入 `cs_copilot_config_version` 的 PUBLISHED 行。
 
 ### 21.5 cs_copilot_trigger_log（触发日志表）
 
@@ -2758,7 +2764,7 @@ CREATE TABLE svccfg.cs_copilot_trigger_log (
     -- 匹配结果
     action_id               varchar(64),
     action_name             varchar(128),
-    menu_item_id            numeric(131089,0),
+    menu_item_id            numeric(20,0),
     candidate_count         numeric(5,0),
 
     -- 推荐策略
@@ -2806,7 +2812,7 @@ CREATE INDEX idx_trigger_log_result
 | intent_name | varchar(256) | 否 | 意图名称 |
 | action_id | varchar(64) | 否 | 匹配的 Copilot action ID |
 | action_name | varchar(128) | 否 | Copilot 动作名称 |
-| menu_item_id | numeric(131089,0) | 否 | 可选关联菜单项 |
+| menu_item_id | numeric(20,0) | 否 | 可选关联菜单项 |
 | candidate_count | numeric(5,0) | 否 | 候选总数 |
 | risk_level | varchar(16) | 否 | LOW/MEDIUM/HIGH |
 | directive_id | varchar(64) | 否 | 指令 ID（UNIQUE 索引 P0-6） |
@@ -2845,7 +2851,7 @@ CREATE TABLE svccfg.cs_copilot_feedback_log (
     feedback_type           varchar(32) NOT NULL,
     intent_code             varchar(64),
     action_id               varchar(64),
-    menu_item_id            numeric(131089,0),
+    menu_item_id            numeric(20,0),
 
     -- 幂等控制（DD-V1.2 P1-14）
     is_effective            char(1) DEFAULT 'Y' NOT NULL,
@@ -2886,7 +2892,7 @@ CREATE UNIQUE INDEX uq_feedback_log_effective_directive
 | feedback_type | varchar(32) | 是 | ACCEPTED / IGNORED / WRONG_INTENT / WRONG_FUNCTION |
 | intent_code | varchar(64) | 否 | 意图代码 |
 | action_id | varchar(64) | 否 | Copilot action ID |
-| menu_item_id | numeric(131089,0) | 否 | 可选关联菜单项 |
+| menu_item_id | numeric(20,0) | 否 | 可选关联菜单项 |
 | is_effective | char(1) | 是 | **DD-V1.2 P1-14** Y=首次有效 / N=重复 |
 | feedback_time | timestamp | 是 | 反馈时间 |
 
@@ -2910,7 +2916,7 @@ Copilot 配置来源：
 
 运行时缓存：
   - 各 Pod 本地持有不可变 CopilotConfigSnapshot
-  - 通过 cs_copilot_config_version.version_id 判断是否刷新
+  - 通过 cs_copilot_config_version.version_id 判断是否刷新，并按该 version_id 读取 action/mapping 快照行
 ```
 
 ### 22.2 运行时快照结构
@@ -2954,8 +2960,8 @@ flowchart TD
     A[Pod 定时轮询] --> B[查询 cs_copilot_config_version 最新 version_id]
     B --> C{version_id 是否变化}
     C -- 否 --> D[继续使用本地快照]
-    C -- 是 --> E[读取启用的 cs_copilot_action]
-    E --> F[读取启用的 cs_copilot_intent_mapping]
+    C -- 是 --> E[按 version_id 读取启用的 cs_copilot_action]
+    E --> F[按 version_id 读取启用的 cs_copilot_intent_mapping]
     F --> G[按需读取 cs_menu_item]
     G --> H[执行配置校验]
     H --> I{校验是否通过}
@@ -2978,6 +2984,7 @@ flowchart TD
 
 | 校验项 | 纯 action | 关联 item 的 action |
 |--------|-----------|---------------------|
+| 版本内容 | 同一 `version_id` 下至少存在 1 个启用 action 和 1 个启用 mapping | 同左 |
 | action 启用状态 | `enabled='Y'` | `enabled='Y'` |
 | 意图映射 | mapping 必须引用存在且启用的 action | 同左 |
 | 目标字段 | `target_kind/open_mode` 必填，并校验组合合法 | 不要求 action 目标字段必填 |
@@ -3197,6 +3204,15 @@ POST /copilot/session/bind
   "operatorId": "ho212121",
   "customerId": "C20120315000123",
   "customerType": "VIP3",
+  "idNo": "110101199001011234",
+  "noIdType": "N",
+  "palmLifeUserId": "PLU10001",
+  "phoneNo": "013812345678",
+  "phoneNoNoZero": "13812345678",
+  "accountNo": "6225881234567890",
+  "address": "深圳市南山区科技园",
+  "addressEncode": "%E6%B7%B1%E5%9C%B3%E5%B8%82%E5%8D%97%E5%B1%B1%E5%8C%BA%E7%A7%91%E6%8A%80%E5%9B%AD",
+  "calledNumber": "95555",
   "sessionStartTime": "2026-04-24T10:00:00.000Z"
 }
 ```
@@ -3209,6 +3225,15 @@ POST /copilot/session/bind
 | operatorId | string | 是 | 坐席工号 |
 | customerId | string | 否 | 客户号（来电弹屏获取） |
 | customerType | string | 否 | 客户类型 |
+| idNo | string | 否 | 证件号，对应 `CUST_ID_NO` |
+| noIdType | string | 否 | 无证件类型标识，对应 `CUST_ID_NO_NOTYPE` |
+| palmLifeUserId | string | 否 | 掌上生活用户 ID |
+| phoneNo | string | 否 | 预留手机号一，对应 `MOBPHN1` |
+| phoneNoNoZero | string | 否 | 预留手机号一去 0，对应 `MOBPHN1_NO_ZERO` |
+| accountNo | string | 否 | 主账户号，对应 `ACCOUNT_NO` |
+| address | string | 否 | 地址，对应 `ADDR_TEXT` |
+| addressEncode | string | 否 | 编码地址，对应 `ENCODE_ADDR_TEXT` |
+| calledNumber | string | 否 | 进线号码，对应 `IN_LINE_N0` |
 | sessionStartTime | string | 否 | 通话开始时间 |
 
 响应：
@@ -3250,11 +3275,22 @@ Authorization: Bearer {admin-token}
   "currentVersion": "20260424.001",
   "loadTimeMs": 145,
   "intentMappingCount": 87,
-  "copilotEnabledItemCount": 32
+  "copilotEnabledActionCount": 32
 }
 ```
 
-### 27.2 健康检查
+### 27.2 配置校验
+
+```
+POST /copilot/admin/config/validate?versionId=202605130001
+Authorization: Bearer {admin-token}
+```
+
+校验指定 `version_id` 的数据库快照：读取同版本 action/mapping，按需校验 `cs_menu_item` 存在、启用和快照一致性，并校验纯 action 的 URL/参数配置。配置后台发布时应先写 action/mapping 快照行，调用该接口通过后，再插入 `cs_copilot_config_version` 的 PUBLISHED 行。
+
+若不传 `versionId` 且请求体传入 `CopilotConfigSnapshot`，则保留旧的内存快照校验能力，仅用于本地调试，不作为发布校验事实来源。
+
+### 27.3 健康检查
 
 ```
 GET /copilot/health
@@ -3453,17 +3489,16 @@ sequenceDiagram
     participant Pub as Copilot 配置发布服务
     participant SVC as Copilot Service
 
-    Admin->>DB: 编辑 cs_copilot_action
-    Note over DB: 活表数据更新
-    Admin->>DB: 编辑 cs_copilot_intent_mapping
+    Admin->>DB: 写入新 version_id 的 cs_copilot_action 快照行
+    Admin->>DB: 写入同 version_id 的 cs_copilot_intent_mapping 快照行
     Admin->>Pub: 点击"发布 Copilot 配置"
 
-    Pub->>DB: 读取 cs_copilot_action WHERE enabled='Y'
-    Pub->>DB: 读取 cs_copilot_intent_mapping WHERE enabled='Y'
+    Pub->>DB: 读取 cs_copilot_action WHERE version_id=? AND enabled='Y'
+    Pub->>DB: 读取 cs_copilot_intent_mapping WHERE version_id=? AND enabled='Y'
     Pub->>DB: 按需读取 cs_menu_item
 
     Pub->>Pub: 执行 action / mapping / item 一致性校验
-    Pub->>DB: INSERT INTO cs_copilot_config_version
+    Pub->>DB: INSERT INTO cs_copilot_config_version(PUBLISHED)
 
     Pub->>SVC: POST /copilot/admin/config/refresh
     SVC->>DB: 查询最新 cs_copilot_config_version
@@ -3790,9 +3825,7 @@ cs-copilot-service/
 │   │   │   ├── IntentTreeLoader.java
 │   │   │   └── ExecutedStepsManager.java
 │   │   ├── match/
-│   │   │   ├── IntentFunctionMatcher.java
-│   │   │   ├── RuleEvaluator.java
-│   │   │   └── JsonRuleEvaluator.java
+│   │   │   └── IntentFunctionMatcher.java
 │   │   ├── param/
 │   │   │   ├── ParamResolver.java
 │   │   │   └── StandardParamType.java

@@ -29,6 +29,15 @@ public class CallSessionManagerImpl implements CallSessionManager {
     private static final String FIELD_OPERATOR_ID = "operatorId";
     private static final String FIELD_CUSTOMER_ID = "customerId";
     private static final String FIELD_CUSTOMER_TYPE = "customerType";
+    private static final String FIELD_ID_NO = "idNo";
+    private static final String FIELD_NO_ID_TYPE = "noIdType";
+    private static final String FIELD_PALM_LIFE_USER_ID = "palmLifeUserId";
+    private static final String FIELD_PHONE_NO = "phoneNo";
+    private static final String FIELD_PHONE_NO_NO_ZERO = "phoneNoNoZero";
+    private static final String FIELD_ACCOUNT_NO = "accountNo";
+    private static final String FIELD_ADDRESS = "address";
+    private static final String FIELD_ADDRESS_ENCODE = "addressEncode";
+    private static final String FIELD_CALLED_NUMBER = "calledNumber";
     private static final String FIELD_SESSION_START_TIME = "sessionStartTime";
 
     private final StringRedisTemplate redisTemplate;
@@ -49,6 +58,15 @@ public class CallSessionManagerImpl implements CallSessionManager {
         fields.put(FIELD_OPERATOR_ID, session.getOperatorId());
         putIfHasText(fields, FIELD_CUSTOMER_ID, session.getCustomerId());
         putIfHasText(fields, FIELD_CUSTOMER_TYPE, session.getCustomerType());
+        putIfHasText(fields, FIELD_ID_NO, session.getIdNo());
+        putIfHasText(fields, FIELD_NO_ID_TYPE, session.getNoIdType());
+        putIfHasText(fields, FIELD_PALM_LIFE_USER_ID, session.getPalmLifeUserId());
+        putIfHasText(fields, FIELD_PHONE_NO, session.getPhoneNo());
+        putIfHasText(fields, FIELD_PHONE_NO_NO_ZERO, session.getPhoneNoNoZero());
+        putIfHasText(fields, FIELD_ACCOUNT_NO, session.getAccountNo());
+        putIfHasText(fields, FIELD_ADDRESS, session.getAddress());
+        putIfHasText(fields, FIELD_ADDRESS_ENCODE, session.getAddressEncode());
+        putIfHasText(fields, FIELD_CALLED_NUMBER, session.getCalledNumber());
         fields.put(FIELD_SESSION_START_TIME, resolveSessionStartTime(session));
 
         String key = key(session.getCallId());
@@ -84,6 +102,15 @@ public class CallSessionManagerImpl implements CallSessionManager {
                 .operatorId(fields.get(FIELD_OPERATOR_ID))
                 .customerId(fields.get(FIELD_CUSTOMER_ID))
                 .customerType(fields.get(FIELD_CUSTOMER_TYPE))
+                .idNo(fields.get(FIELD_ID_NO))
+                .noIdType(fields.get(FIELD_NO_ID_TYPE))
+                .palmLifeUserId(fields.get(FIELD_PALM_LIFE_USER_ID))
+                .phoneNo(fields.get(FIELD_PHONE_NO))
+                .phoneNoNoZero(fields.get(FIELD_PHONE_NO_NO_ZERO))
+                .accountNo(fields.get(FIELD_ACCOUNT_NO))
+                .address(fields.get(FIELD_ADDRESS))
+                .addressEncode(fields.get(FIELD_ADDRESS_ENCODE))
+                .calledNumber(fields.get(FIELD_CALLED_NUMBER))
                 .sessionStartTime(fields.get(FIELD_SESSION_START_TIME))
                 .build();
     }

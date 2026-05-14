@@ -8,6 +8,7 @@ import lombok.Data;
 @Data
 public class CopilotActionRow {
 
+    private String versionId;
     private String actionId;
     private Long menuItemId;
     private String itemSnapshotJson;

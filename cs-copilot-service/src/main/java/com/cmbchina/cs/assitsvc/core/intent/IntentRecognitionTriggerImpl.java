@@ -131,18 +131,33 @@ public class IntentRecognitionTriggerImpl implements IntentRecognitionTrigger {
 
     private static ParamContext buildParamContext(CallSession session) {
         Map<String, Object> sessionData = new HashMap<>();
-        sessionData.put("customer.customerId", session.getCustomerId());
-        sessionData.put("customer.customerType", session.getCustomerType());
-        sessionData.put("customerId", session.getCustomerId());
-        sessionData.put("customerType", session.getCustomerType());
+        putIfHasText(sessionData, "customer.customerId", session.getCustomerId());
+        putIfHasText(sessionData, "customer.customerType", session.getCustomerType());
+        putIfHasText(sessionData, "customer.idNo", session.getIdNo());
+        putIfHasText(sessionData, "customer.noIdType", session.getNoIdType());
+        putIfHasText(sessionData, "customer.palmLifeUserId", session.getPalmLifeUserId());
+        putIfHasText(sessionData, "customer.phoneNo", session.getPhoneNo());
+        putIfHasText(sessionData, "customer.phoneNoNoZero", session.getPhoneNoNoZero());
+        putIfHasText(sessionData, "accounts[0].accountNo", session.getAccountNo());
+        putIfHasText(sessionData, "customer.address", session.getAddress());
+        putIfHasText(sessionData, "customer.addressEncode", session.getAddressEncode());
+        putIfHasText(sessionData, "customerId", session.getCustomerId());
+        putIfHasText(sessionData, "customerType", session.getCustomerType());
 
         Map<String, Object> callMetaData = new HashMap<>();
-        callMetaData.put("callId", session.getCallId());
-        callMetaData.put("operatorId", session.getOperatorId());
+        putIfHasText(callMetaData, "callId", session.getCallId());
+        putIfHasText(callMetaData, "operatorId", session.getOperatorId());
+        putIfHasText(callMetaData, "calledNumber", session.getCalledNumber());
 
         return ParamContext.builder()
                 .sessionData(sessionData)
                 .callMetaData(callMetaData)
                 .build();
+    }
+
+    private static void putIfHasText(Map<String, Object> target, String key, String value) {
+        if (StringUtils.hasText(value)) {
+            target.put(key, value);
+        }
     }
 }

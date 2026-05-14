@@ -46,9 +46,13 @@ public class CopilotConfigValidationServiceImpl implements CopilotConfigValidati
         }
         if (snapshot.getIntentToActions() == null) {
             errors.add("intentToActions must not be null");
+        } else if (snapshot.getIntentToActions().isEmpty()) {
+            errors.add("intentToActions must not be empty");
         }
         if (snapshot.getActionById() == null) {
             errors.add("actionById must not be null");
+        } else if (snapshot.getActionById().isEmpty()) {
+            errors.add("actionById must not be empty");
         }
     }
 

@@ -150,7 +150,7 @@ wireMockServer.stubFor(post(urlEqualTo("/AICSCopilotReplyGen/getSopResult.json")
 
 ### 目标
 
-完成 StandardParamType、RuleEvaluator、UrlBuilder。
+完成 StandardParamType、UrlBuilder。
 
 ### 操作
 

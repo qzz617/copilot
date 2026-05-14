@@ -468,8 +468,8 @@ com.cmbchina.cs.assitsvc.config
 
 **关键约束**：
 - 不改动 `cs_menu_version.config_data`
-- 发布 `cs_copilot_config_version`
-- 从 `cs_copilot_action`、`cs_copilot_intent_mapping` 构建运行时快照
+- action/mapping 先按新 `version_id` 写入不可变快照行，校验通过后最后发布 `cs_copilot_config_version`
+- 从同一 `version_id` 的 `cs_copilot_action`、`cs_copilot_intent_mapping` 构建运行时快照
 - 关联 `menu_item_id` 时读取 `cs_menu_item` 做存在性、启用状态和快照一致性校验
 - DD-V1.2 P1-8：发布前基础校验
 
@@ -487,6 +487,7 @@ com.cmbchina.cs.assitsvc.config
 ```
 com.cmbchina.cs.assitsvc.api.controller
 └── AdminController            # POST /copilot/admin/config/refresh
+                                  POST /copilot/admin/config/validate
                                   POST /copilot/admin/intent-tree/reload
                                   GET  /copilot/health
 ```

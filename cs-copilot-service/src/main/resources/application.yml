@@ -34,7 +34,7 @@ spring:
         min-idle: 2
         max-wait: 2000ms
 
-  # ============= 数据源（cs_menu_* 等存量表 + Copilot 新增表） =============
+  # ============= 数据源（TDSQL PG 兼容库：cs_menu_* 等存量表 + Copilot 新增表） =============
   datasource:
     url: ${DATASOURCE_URL:jdbc:postgresql://localhost:5432/cccs}
     username: ${DATASOURCE_USERNAME:cccs}

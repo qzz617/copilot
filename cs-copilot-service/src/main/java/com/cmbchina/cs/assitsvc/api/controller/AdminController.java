@@ -5,6 +5,7 @@ import com.cmbchina.cs.assitsvc.api.dto.ApiResult;
 import com.cmbchina.cs.assitsvc.api.dto.AdminResult;
 import com.cmbchina.cs.assitsvc.config.ConfigValidationResult;
 import com.cmbchina.cs.assitsvc.config.CopilotConfigCache;
+import com.cmbchina.cs.assitsvc.config.CopilotConfigRepository;
 import com.cmbchina.cs.assitsvc.config.CopilotConfigValidationService;
 import com.cmbchina.cs.assitsvc.core.intent.IntentTreeLoader;
 import com.cmbchina.cs.assitsvc.domain.CopilotConfigSnapshot;
@@ -14,6 +15,7 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -29,6 +31,7 @@ public class AdminController {
 
     private final IntentTreeLoader intentTreeLoader;
     private final CopilotConfigCache configCache;
+    private final CopilotConfigRepository configRepository;
     private final CopilotConfigValidationService validationService;
     private final AdminSecurityProperties securityProperties;
 
@@ -72,19 +75,37 @@ public class AdminController {
     }
 
     /**
-     * 校验待发布的 Copilot 配置快照。
+     * 校验待发布的 Copilot 配置。
      *
-     * @param data 待校验配置
+     * @param versionId 待校验配置版本号；传入时校验数据库快照
+     * @param data      待校验内存快照；仅用于本地调试兼容
      * @return 校验结果
      */
     @PostMapping("/config/validate")
-    public ApiResult validateConfig(HttpServletRequest request, @RequestBody CopilotConfigSnapshot data) {
+    public ApiResult validateConfig(HttpServletRequest request,
+                                    @RequestParam(value = "versionId", required = false) String versionId,
+                                    @RequestBody(required = false) CopilotConfigSnapshot data) {
         authorize(request);
-        ConfigValidationResult result = validationService.validate(data);
-        if (result.isSuccess()) {
-            return ApiResult.ok();
+        try {
+            CopilotConfigSnapshot snapshot = resolveValidationSnapshot(versionId, data);
+            ConfigValidationResult result = validationService.validate(snapshot);
+            if (result.isSuccess()) {
+                return ApiResult.ok();
+            }
+            return ApiResult.fail("4000", "CONFIG_VALIDATION_FAILED", String.valueOf(result.getErrors()));
+        } catch (RuntimeException e) {
+            return ApiResult.fail("4000", "CONFIG_VALIDATION_FAILED", e.getMessage());
         }
-        return ApiResult.fail("4000", "CONFIG_VALIDATION_FAILED", String.valueOf(result.getErrors()));
+    }
+
+    private CopilotConfigSnapshot resolveValidationSnapshot(String versionId, CopilotConfigSnapshot data) {
+        if (StringUtils.hasText(versionId)) {
+            return configRepository.loadSnapshot(versionId);
+        }
+        if (data != null) {
+            return data;
+        }
+        return configRepository.loadLatestSnapshot();
     }
 
     private void authorize(HttpServletRequest request) {

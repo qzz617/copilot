@@ -14,6 +14,9 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class IntentMapping {
 
+    /** 配置版本号 */
+    private String versionId;
+
     /** 主键 UUID */
     private String mappingId;
 
