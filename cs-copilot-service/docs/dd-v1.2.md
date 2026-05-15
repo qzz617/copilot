@@ -249,6 +249,7 @@
 | F13 | 服务端权限校验 | P3 |
 | **F14** | **URL 一次性 token 跳转**（DD-V1.2 新增） | **P2** |
 | **F15** | **Pod 重启 timer 持久化**（DD-V1.2 新增） | **P3** |
+| F16 | 菜单变更自动触发 Copilot 配置发布 | P3 |
 
 ---
 
@@ -2999,17 +3000,17 @@ flowchart TD
 - 配置后台发布时：阻断发布，返回具体错误。
 - 服务运行时刷新时：保留上一版有效快照；如果只存在少量失效 action，可按配置决定整版失败或跳过失效 action。MVP 建议整版失败，避免各 Pod 看到不同候选集。
 
-### 22.6 已确认与待澄清问题
+### 22.6 已确认问题
 
-| 编号 | 问题 | 建议默认值 |
-|------|------|------------|
-| C1 | 前端是否支持仅凭 `menuItemId` 调用现有快捷导航打开逻辑？ | 已确认支持；关联 item 时指令只传 `menuItemId` |
+| 编号 | 问题 | 决策 |
+|------|------|------|
+| C1 | 前端是否支持仅凭 `menuItemId` 调用现有快捷导航打开逻辑？ | 已确认支持 |
 | C2 | `cs_menu_item.enabled` 的真实启用值是什么？ | 已确认启用值为 `Y` |
-| Q1 | `item_snapshot_json` 是否必填？ | 建议非必填；需要审计和防漂移时再启用 |
-| Q2 | 菜单项变化后是否自动触发 Copilot 版本发布？ | 建议触发；否则 Copilot 可能继续使用旧快照直到下一次手工发布 |
-| Q3 | 运行时发现单个 action 关联 item 失效时，是整版失败还是跳过单个 action？ | MVP 建议整版失败，保障一致性 |
-| Q4 | 纯 action 的 `target_kind/open_mode` 是否允许继续扩展 COMPONENT/POPUP/DRAWER？ | 本期建议只支持 URL / ROUTE / IFRAME / NEW_WINDOW |
-| Q5 | 纯 action 没有 `menuItemId` 时，前端业务权限如何判断？ | 建议本期通过 Copilot 配置、灰度白名单和目标 URL 白名单控制；若需细粒度权限，新增 action 级权限模型 |
+| C3 | `item_snapshot_json` 是否必填？ | **MVP 非必填**；非空时必须做快照一致性校验（已实现于 MybatisCopilotConfigRepository.validateSnapshot） |
+| C4 | 菜单项变化后是否自动触发 Copilot 版本发布? | **手工触发**，不做自动联动；自动联动改造较大，列为 F16 后续待实现 |
+| C5 | 运行时单 action 关联 item 失效时整版失败还是跳过？ | **整版失败**，与当前 `MybatisCopilotConfigRepository` 实现一致 |
+| C6 | 纯 action 的 `target_kind/open_mode` 是否允许扩展 COMPONENT/POPUP/DRAWER？ | **本期严格限制四种**：URL / ROUTE / IFRAME / NEW_WINDOW；配置后台校验拒绝其他值（已实现于 CopilotConfigValidationServiceImpl.validateActionCombination） |
+| C7 | 纯 action 没有 `menuItemId` 时业务权限如何判断？ | **复用 URL 白名单 + 灰度白名单**，前端不做 menuItemId 权限校验；记录为已知风险（§2.3） |
 
 ---
 
@@ -3397,6 +3398,14 @@ Content-Type: application/json
 | COP_AI_TIMEOUT | AI 接口超时 |
 | COP_AI_FAILED | AI 接口业务失败 |
 | COP_CONFIG_VERSION_STALE | 配置版本不一致 |
+| COP_MENU_ITEM_NOT_FOUND | 菜单项不存在（关联 menu_item_id 校验失败） |
+| COP_MENU_ITEM_DISABLED | 菜单项已禁用 |
+| COP_SNAPSHOT_MISMATCH | 菜单项快照与当前菜单项不一致 |
+| COP_DIRECTIVE_NOT_FOUND | 反馈对应的指令不存在（trigger_log 查不到） |
+| COP_DIRECTIVE_EXPIRED | 指令已过期 |
+| COP_FEEDBACK_CONTEXT_MISMATCH | 反馈上下文与指令记录不一致（callId/operatorId/intentCode/actionId） |
+| COP_FEEDBACK_DUPLICATE | 反馈已被首次处理（重复反馈，仅记录不影响业务状态） |
+| COP_ADMIN_TOKEN_INVALID | Admin 接口鉴权失败 |
 
 ### 29.3 错误响应示例
 

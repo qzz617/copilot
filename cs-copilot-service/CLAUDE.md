@@ -83,12 +83,29 @@ import javax.validation.Valid;
 
 | 项 | 必须用 | 不要用 |
 |---|--------|--------|
-| Redis 客户端 | **Jedis** + JedisPool | Lettuce |
+| Redis 抽象层 | **StringRedisTemplate** | RedisTemplate<Object,Object>（避免序列化坑） |
+| Redis 连接驱动 | 由 spring-boot-starter-data-redis 自动选择（默认 Lettuce） | 直接使用 Jedis / Lettuce 原生 API |
 | JSON 库 | **FastJSON 2.x**（`com.alibaba.fastjson2`） | Jackson、Gson |
 | Kafka 客户端 | **Spring Kafka**（`spring-kafka`） | 原生 Kafka Client |
 | HTTP 客户端 | **Spring Cloud OpenFeign** | RestTemplate、Apache HttpClient |
 | 熔断库 | **Resilience4j** | Hystrix、Sentinel |
+| ORM 框架 | **MyBatis-Plus** 3.5.7（com.baomidou） | 原生 MyBatis、JPA、Hibernate |
 | 日志门面 | **SLF4J + Lombok @Slf4j** | 直接用 LoggerFactory |
+
+### Redis 使用约定
+
+- 业务代码统一通过 `StringRedisTemplate` 操作 Redis，不直接接触底层连接驱动
+- 连接驱动默认走 Spring Boot 自动配置（当前为 Lettuce），无需在 `RedisConfig` 中自定义 `JedisConnectionFactory`
+- 不允许在代码中显式调用阻塞命令（如 `redisTemplate.delete(...)`，见 §"Redis 清理策略"）
+- 通话级临时数据全部依赖 TTL 自动过期清理
+
+### MyBatis-Plus 使用约定
+
+- 使用 mybatis-plus-boot-starter，版本固定 3.5.7
+- 配置文件中如有自动行为（逻辑删除、乐观锁、自动填充等），必须在 `application.yml` 显式声明，禁止依赖默认值
+- 当前项目未启用 `@TableLogic` / `@Version` / `MetaObjectHandler`，新增模块如需启用必须先更新本文档
+- ID 生成策略：业务主键由代码生成（UUID 去横线 / 业务自定义），不依赖 MyBatis-Plus 雪花 ID
+- Mapper 接口使用 `@Mapper` 注解 + `@Select` 内联 SQL，**不写 mapper xml**（与项目体量匹配）
 
 **FastJSON 2.x 用法**：
 

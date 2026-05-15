@@ -3,9 +3,8 @@ package com.cmbchina.cs.assitsvc.core.intent;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONException;
 import com.cmbchina.cs.assitsvc.domain.IntentTreeNode;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StreamUtils;
 import org.springframework.util.StringUtils;
@@ -22,13 +21,10 @@ import java.util.List;
  */
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class IntentTreeLoaderImpl implements IntentTreeLoader {
 
-    @Value("${copilot.intent-tree.file}")
-    private Resource intentTreeFile;
-
-    @Value("${copilot.intent-tree.version}")
-    private String version;
+    private final IntentTreeProperties props;
 
     private volatile IntentTreeSnapshot snapshot = new IntentTreeSnapshot(null, 0, null);
 
@@ -49,7 +45,7 @@ public class IntentTreeLoaderImpl implements IntentTreeLoader {
         this.snapshot = new IntentTreeSnapshot(newTree, newNodeCount, newLoadTime);
 
         log.info("[M05] Intent tree loaded, version={}, nodeCount={}, loadTime={}",
-                version, newNodeCount, newLoadTime);
+                props.getVersion(), newNodeCount, newLoadTime);
     }
 
     @Override
@@ -59,7 +55,7 @@ public class IntentTreeLoaderImpl implements IntentTreeLoader {
 
     @Override
     public String getVersion() {
-        return version;
+        return props.getVersion();
     }
 
     @Override
@@ -73,7 +69,7 @@ public class IntentTreeLoaderImpl implements IntentTreeLoader {
     }
 
     private IntentTreeNode loadTree() {
-        try (InputStream inputStream = intentTreeFile.getInputStream()) {
+        try (InputStream inputStream = props.getFile().getInputStream()) {
             String content = StreamUtils.copyToString(inputStream, StandardCharsets.UTF_8);
             IntentTreeNode root = JSON.parseObject(content, IntentTreeNode.class);
             validateRoot(root);

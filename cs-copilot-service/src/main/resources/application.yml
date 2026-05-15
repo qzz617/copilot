@@ -112,8 +112,6 @@ copilot:
     - frdctrfront.paas.cmbchina.cn
     - mccusweb.paas.cmbchina.cn
     - cccsweb.paas.cmbchina.cn
-    - frdctrfront.paasuat.cmbchina.cn
-    - mccusweb.paasuat.cmbchina.cn
 
   # URL Builder 配置（DD-V1.2 P0-5）
   url-builder:

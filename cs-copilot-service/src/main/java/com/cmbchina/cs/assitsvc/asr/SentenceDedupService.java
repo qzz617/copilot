@@ -19,8 +19,8 @@ import java.util.concurrent.TimeUnit;
 @RequiredArgsConstructor
 public class SentenceDedupService {
 
-    private static final String KEY_PREFIX = "copilot:asr_dedup:{";
-    private static final String KEY_SUFFIX = "}";
+    private static final String KEY_PREFIX = "copilot:asr_dedup:";
+    private static final String KEY_SUFFIX = "";
 
     private final StringRedisTemplate redisTemplate;
     private final AsrProperties props;
