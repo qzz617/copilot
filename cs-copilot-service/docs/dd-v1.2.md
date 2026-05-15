@@ -250,6 +250,7 @@
 | **F14** | **URL 一次性 token 跳转**（DD-V1.2 新增） | **P2** |
 | **F15** | **Pod 重启 timer 持久化**（DD-V1.2 新增） | **P3** |
 | F16 | 菜单变更自动触发 Copilot 配置发布 | P3 |
+| F17 | sentence merger 独立 Redis 实例 / Redisson 延迟队列改造 | P3 |
 
 ---
 
@@ -707,6 +708,24 @@ MVP 方案：Kafka Topic 按 callId 哈希分区
 
 后续优化（待实现）：Redis 分布式锁 + 全局防抖 timer
 ```
+
+### 9.7 Redis Cluster 单 slot 路由（DD-V1.2 决策）
+
+M02 防抖状态使用统一 hash tag `{asr_merge}`，目的是让 `pollDueTasks` 中的 Lua claim 脚本能跨 `stateKey(callId)` 和 `DUE_QUEUE_KEY` 两个 key 执行（Redis Cluster 要求脚本中所有 key 同 slot）。
+
+**已知 trade-off**：
+
+- 所有 callId 的 sentence merger 状态集中在 Redis Cluster 中**单个 master 节点的单个 slot**
+- 单 Pod 高峰估算：~50 次/秒 ZADD（每次 handleSentence 三次写）+ 200ms 轮询
+- 全集群 N Pod 高峰：约 50N 次/秒 写 + N 次/200ms 轮询，对单 Redis 节点负载有限（典型 Redis 节点 10w QPS 以上）
+
+**扩容触发条件**：
+
+- 单通话日均 > 5 万通（当前 §34 估算 2 万通）
+- 或单 Pod 高峰 sentence merger 写入 > 200 次/秒
+- 触发后需切换到独立 Redis 实例承载延迟队列，或改用 Redisson DelayedQueue 重新实现 M02
+
+**不在本期范围**：F17 sentence merger 独立 Redis 实例（待实现）
 
 ---
 
@@ -3580,6 +3599,7 @@ graph TB
 | 滚动发布 | 保证至少 1 个 Pod 可服务 |
 | Kafka 分区 | ≥ Pod 数 × 2，按 callId 哈希分区 |
 | Redis 集群 | 高可用，TTL 自动清理 |
+| Redis 单 slot 监控 | 监控 `{asr_merge}` slot 对应 master 节点的 CPU/QPS，超阈值时启动 F17 改造 |
 | Copilot 配置重新加载 | 通过 Admin 接口触发，并由版本轮询兜底，不重启服务 |
 
 ---
