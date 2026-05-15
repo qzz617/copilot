@@ -45,7 +45,7 @@ public class MetricsService {
                     .riskLevel(directive.getRisk() == null ? null : directive.getRisk().getRiskLevel())
                     .directiveId(directive.getDirectiveId())
                     .expireAt(parseInstant(directive.getExpireAt()))
-                    .directiveStatus("PUSHED")
+                    .directiveStatus("PUBLISHED")
                     .resultStatus("SUCCESS")
                     .triggerTime(Instant.now())
                     .configVersion(directive.getConfigVersion())

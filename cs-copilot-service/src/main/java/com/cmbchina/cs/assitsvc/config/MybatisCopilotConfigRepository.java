@@ -61,9 +61,21 @@ public class MybatisCopilotConfigRepository implements CopilotConfigRepository {
         Map<Long, CopilotMenuItemRow> menuItems = loadMenuItems(menuItemIds);
 
         Map<String, CopilotActionConfig> actionById = new LinkedHashMap<>();
+        List<String> errors = new ArrayList<>();
         for (CopilotActionRow row : actionRows) {
-            CopilotActionConfig action = toActionConfig(row, menuItems);
-            actionById.put(action.getActionId(), action);
+            try {
+                CopilotActionConfig action = toActionConfig(row, menuItems);
+                actionById.put(action.getActionId(), action);
+            } catch (IllegalStateException e) {
+                errors.add(e.getMessage());
+            }
+        }
+
+        if (!errors.isEmpty()) {
+            throw new IllegalStateException(
+                    "Copilot config validation failed, versionId=" + versionId
+                            + ", errorCount=" + errors.size()
+                            + ", errors=" + errors);
         }
 
         Map<String, List<ActionReference>> intentToActions = buildIntentIndex(mappings);

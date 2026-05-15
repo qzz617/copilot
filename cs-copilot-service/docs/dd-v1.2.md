@@ -1126,15 +1126,13 @@ copilot:
 public class IntentRecognitionClient {
 
     @CircuitBreaker(name = "aiIntentClient", fallbackMethod = "fallback")
-    public IntentResult recognize(String callId) {
+    public IntentRecognitionOutcome recognize(String callId) {
         // 正常调用逻辑
     }
 
-    private IntentResult fallback(String callId, Throwable t) {
+    private IntentRecognitionOutcome fallback(String callId, Throwable t) {
         log.warn("AI circuit breaker open: callId={}", callId);
-        metricsService.recordAiCircuitBreakerOpen();
-        // 前端展示"AI 不可用"灰态
-        return null;
+        return IntentRecognitionOutcome.failure(ReasonCodeConstants.AI_CIRCUIT_BREAKER_OPEN);
     }
 }
 ```
@@ -1144,18 +1142,16 @@ public class IntentRecognitionClient {
 > 防止单通话超频调用 AI（恶意或异常）。
 
 ```java
-public IntentResult recognize(String callId) {
-    String key = "copilot:ai_count:" + callId;
-    Long count = redisTemplate.opsForValue().increment(key);
-    if (count == 1L) {
-        redisTemplate.expire(key, Duration.ofHours(2));
+public IntentRecognitionOutcome recognize(String callId) {
+    if (!precheckAiCall(callId)) {
+        return IntentRecognitionOutcome.failure(
+            ReasonCodeConstants.AI_CALL_LIMIT_EXCEEDED);
     }
-    if (count > maxAiCallsPerCall) {
-        triggerLogService.logFailure(callId, null,
-            ResultStatus.FAIL, ReasonCode.AI_CALL_LIMIT_EXCEEDED);
-        return null;
+    IntentRecognitionOutcome outcome = callAi(callId);
+    if (outcome.isSuccess()) {
+        incrementAiCallCount(callId);
     }
-    // 继续调用
+    return outcome;
 }
 ```
 
@@ -1199,17 +1195,23 @@ public class IntentRecognitionClient {
     @Autowired private IntentTreeLoader treeLoader;
     @Autowired private ExecutedStepsManager stepsManager;
 
-    public IntentResult recognize(String callId) {
+    public IntentRecognitionOutcome recognize(String callId) {
         // 1. 取全量历史（客户+坐席）
         List<DialogMessage> fullHistory = historyManager.getHistory(callId);
-        if (fullHistory.isEmpty()) return null;
+        if (fullHistory.isEmpty()) {
+            return IntentRecognitionOutcome.failure(
+                ReasonCodeConstants.NO_CUSTOMER_HISTORY);
+        }
 
         // 2. 过滤只保留客户消息（DD-V1.1 关键设计）
         List<DialogMessage> customerOnly = fullHistory.stream()
             .filter(m -> "CUSTOMER".equals(m.getSpeakerRole()))
             .collect(Collectors.toList());
 
-        if (customerOnly.isEmpty()) return null;
+        if (customerOnly.isEmpty()) {
+            return IntentRecognitionOutcome.failure(
+                ReasonCodeConstants.NO_CUSTOMER_HISTORY);
+        }
 
         // 3. 构建请求
         IntentRecognitionRequest request = IntentRecognitionRequest.builder()
@@ -1228,8 +1230,7 @@ public class IntentRecognitionClient {
         } catch (FeignException e) {
             log.warn("AI intent recognition failed: callId={}, status={}",
                 callId, e.status(), e);
-            metricsService.recordAiFailure();
-            return null;  // 静默失败
+            throw e;  // 交给 Resilience4j fallback 分类为 AI_NETWORK_FAIL
         }
     }
 }
@@ -1892,21 +1893,25 @@ public class CopilotPushService {
 
     @Autowired private SimpMessagingTemplate messagingTemplate;
 
-    public void pushDirective(DirectiveDTO directive) {
+    public boolean publishDirectiveAsync(DirectiveDTO directive) {
         String destination = "/user/" + directive.getOperatorId()
             + "/copilot/directive";
         try {
             messagingTemplate.convertAndSend(destination, directive);
             log.info("Pushed: directiveId={}, operatorId={}",
                 directive.getDirectiveId(), directive.getOperatorId());
+            return true;
         } catch (Exception e) {
             log.error("Push failed: {}", directive.getDirectiveId(), e);
+            return false;
         }
     }
 }
 ```
 
 > 注：复用工作台已有 WebSocket 基础设施。
+>
+> **送达保证说明**：CopilotPushService.publishDirectiveAsync 只保证 Redis Pub/Sub 发布成功，不保证指令送达任何 WebSocket 连接。trigger_log.directive_status=PUBLISHED 表示已发布，真实送达需要前端 ACK 反馈机制（本期未实现，预留 markDirectiveDelivered 方法）。BI 看板计算覆盖率时应注意此语义。
 
 ---
 
@@ -2142,6 +2147,9 @@ cs_copilot_feedback_log（反馈日志，DD-V1.2 字段扩展）
 AI_TIMEOUT                 AI 调用超时
 AI_FAILED                  AI 业务失败
 AI_CIRCUIT_BREAKER_OPEN    熔断打开
+AI_NETWORK_FAIL            AI 网络/超时失败
+AI_BUSINESS_FAIL           AI 响应业务失败
+NO_CUSTOMER_HISTORY        无客户侧对话历史
 INTENT_EMPTY               AI 返回空意图
 INTENT_NOT_MAPPED          意图未配置映射
 
@@ -2772,7 +2780,7 @@ CREATE TABLE svccfg.cs_copilot_trigger_log (
     risk_level              varchar(16),
     directive_id            varchar(64),
     expire_at               timestamp,                    -- DD-V1.2 P0-6 指令过期时间
-    directive_status        varchar(16),                  -- DD-V1.2 P0-6 PUSHED/EXPIRED/CONSUMED
+    directive_status        varchar(16),                  -- DD-V1.2 P0-6 PUBLISHED/EXPIRED/CONSUMED/DELIVERED
 
     -- 业务结果
     result_status           varchar(32),                  -- SUCCESS/FAIL/FILTERED
@@ -2818,7 +2826,7 @@ CREATE INDEX idx_trigger_log_result
 | risk_level | varchar(16) | 否 | LOW/MEDIUM/HIGH |
 | directive_id | varchar(64) | 否 | 指令 ID（UNIQUE 索引 P0-6） |
 | expire_at | timestamp | 否 | **DD-V1.2 P0-6** 指令过期时间，反馈时校验 |
-| directive_status | varchar(16) | 否 | **DD-V1.2 P0-6** PUSHED/EXPIRED/CONSUMED |
+| directive_status | varchar(16) | 否 | **DD-V1.2 P0-6** PUBLISHED/EXPIRED/CONSUMED/DELIVERED；DELIVERED 为前端 ACK 后状态，本期预留 |
 | result_status | varchar(32) | 否 | **DD-V1.2 P1-16** SUCCESS/FAIL/FILTERED |
 | reason_code | varchar(64) | 否 | **DD-V1.2 P1-16** 详见 reason_code 枚举 |
 | filter_stage | varchar(32) | 否 | **DD-V1.2 P1-16** 过滤发生的阶段 |

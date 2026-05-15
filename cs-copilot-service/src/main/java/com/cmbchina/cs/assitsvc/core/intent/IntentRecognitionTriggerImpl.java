@@ -57,14 +57,16 @@ public class IntentRecognitionTriggerImpl implements IntentRecognitionTrigger {
             return;
         }
 
-        IntentResult intentResult = intentRecognitionService.recognize(callId);
-        if (intentResult == null || !StringUtils.hasText(intentResult.getIntentCode())) {
+        IntentRecognitionOutcome outcome = intentRecognitionService.recognize(callId);
+        if (outcome == null || !outcome.isSuccess()) {
+            String failReason = outcome == null ? ReasonCodeConstants.INTENT_EMPTY : outcome.getFailReason();
             metricsService.recordTriggerFailure(callId, session, null, null,
-                    ReasonCodeConstants.INTENT_EMPTY,
+                    failReason,
                     FilterStageConstants.INTENT_RECOGNITION,
                     configCache.getCurrentVersion());
             return;
         }
+        IntentResult intentResult = outcome.getIntent();
 
         List<ItemCandidate> candidates = matcherService.match(intentResult, session);
         if (candidates.isEmpty()) {
@@ -96,15 +98,15 @@ public class IntentRecognitionTriggerImpl implements IntentRecognitionTrigger {
                     .paramContext(buildParamContext(session))
                     .build();
             DirectiveDTO directive = directiveBuilderService.build(context, intentResult);
-            boolean pushed = pushService.pushDirective(directive);
-            if (pushed) {
+            boolean published = pushService.publishDirectiveAsync(directive);
+            if (published) {
                 metricsService.recordTriggerSuccess(directive, session, candidate, candidateCount);
             } else {
                 metricsService.recordTriggerFailure(callId, session, intentResult.getIntentCode(),
                         intentResult.getIntentName(), ReasonCodeConstants.PUSH_FAILED,
                         FilterStageConstants.PUSH, configCache.getCurrentVersion());
             }
-            return pushed;
+            return published;
         } catch (RuntimeException e) {
             log.warn("[M09] Build or push directive failed, callId={}, actionId={}",
                     callId, candidate == null ? null : candidate.getActionId(), e);

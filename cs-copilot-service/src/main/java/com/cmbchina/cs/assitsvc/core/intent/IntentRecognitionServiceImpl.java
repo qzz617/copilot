@@ -7,7 +7,9 @@ import com.cmbchina.cs.assitsvc.infra.feign.AiIntentFeignClient;
 import com.cmbchina.cs.assitsvc.infra.feign.dto.AiDialogMessage;
 import com.cmbchina.cs.assitsvc.infra.feign.dto.IntentRecognitionRequest;
 import com.cmbchina.cs.assitsvc.infra.feign.dto.IntentRecognitionResponse;
+import com.cmbchina.cs.assitsvc.infra.metrics.ReasonCodeConstants;
 import feign.FeignException;
+import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -51,19 +53,19 @@ public class IntentRecognitionServiceImpl implements IntentRecognitionService {
 
     @Override
     @CircuitBreaker(name = "aiIntentClient", fallbackMethod = "fallback")
-    public IntentResult recognize(String callId) {
+    public IntentRecognitionOutcome recognize(String callId) {
         if (!StringUtils.hasText(callId)) {
             throw new IllegalArgumentException("callId must not be null or empty");
         }
-        if (!allowAiCall(callId)) {
+        if (!precheckAiCall(callId)) {
             log.warn("[M06] AI call limit exceeded, callId={}, maxAiCalls={}", callId, maxAiCalls);
-            return null;
+            return IntentRecognitionOutcome.failure(ReasonCodeConstants.AI_CALL_LIMIT_EXCEEDED);
         }
 
         List<AiDialogMessage> customerOnly = customerOnlyHistory(callId);
         if (customerOnly.isEmpty()) {
             log.debug("[M06] No customer history for AI recognition, callId={}", callId);
-            return null;
+            return IntentRecognitionOutcome.failure(ReasonCodeConstants.NO_CUSTOMER_HISTORY);
         }
 
         IntentRecognitionRequest request = IntentRecognitionRequest.builder()
@@ -77,7 +79,11 @@ public class IntentRecognitionServiceImpl implements IntentRecognitionService {
 
         try {
             IntentRecognitionResponse response = feignClient.recognize(request);
-            return parseResponse(callId, request.getRequestId(), response);
+            IntentRecognitionOutcome outcome = parseResponse(callId, request.getRequestId(), response);
+            if (outcome.isSuccess()) {
+                incrementAiCallCount(callId);
+            }
+            return outcome;
         } catch (FeignException e) {
             log.warn("[M06] AI intent recognition failed, callId={}, status={}", callId, e.status(), e);
             throw e;
@@ -89,11 +95,15 @@ public class IntentRecognitionServiceImpl implements IntentRecognitionService {
      *
      * @param callId 通话 ID
      * @param t      异常
-     * @return null
+     * @return 失败结果包装
      */
-    public IntentResult fallback(String callId, Throwable t) {
-        log.warn("[M06] AI circuit breaker fallback, callId={}", callId, t);
-        return null;
+    public IntentRecognitionOutcome fallback(String callId, Throwable t) {
+        if (t instanceof CallNotPermittedException) {
+            log.warn("[M06] AI circuit breaker open, callId={}", callId);
+            return IntentRecognitionOutcome.failure(ReasonCodeConstants.AI_CIRCUIT_BREAKER_OPEN);
+        }
+        log.warn("[M06] AI call fallback by network/timeout failure, callId={}", callId, t);
+        return IntentRecognitionOutcome.failure(ReasonCodeConstants.AI_NETWORK_FAIL);
     }
 
     private List<AiDialogMessage> customerOnlyHistory(String callId) {
@@ -117,38 +127,54 @@ public class IntentRecognitionServiceImpl implements IntentRecognitionService {
                 .build();
     }
 
-    private IntentResult parseResponse(String callId, String requestId, IntentRecognitionResponse response) {
+    private IntentRecognitionOutcome parseResponse(String callId, String requestId, IntentRecognitionResponse response) {
         if (response == null) {
             log.warn("[M06] AI response is null, callId={}, requestId={}", callId, requestId);
-            return null;
+            return IntentRecognitionOutcome.failure(ReasonCodeConstants.AI_BUSINESS_FAIL);
         }
         if (!"1000".equals(response.getRespCode())) {
             log.warn("[M06] AI response code not success, callId={}, requestId={}, respCode={}, respMsg={}",
                     callId, requestId, response.getRespCode(), response.getRespMsg());
-            return null;
+            return IntentRecognitionOutcome.failure(ReasonCodeConstants.AI_BUSINESS_FAIL);
         }
         IntentRecognitionResponse.DataNode data = response.getData();
         if (data == null || !StringUtils.hasText(data.getIntentCode())) {
             log.debug("[M06] AI returned empty intent, callId={}, requestId={}", callId, requestId);
-            return null;
+            return IntentRecognitionOutcome.failure(ReasonCodeConstants.INTENT_EMPTY);
         }
 
-        return IntentResult.builder()
+        return IntentRecognitionOutcome.success(IntentResult.builder()
                 .intentCode(data.getIntentCode())
                 .intentName(data.getIntentName())
-                .build();
+                .build());
     }
 
-    private boolean allowAiCall(String callId) {
+    private boolean precheckAiCall(String callId) {
+        String key = AI_COUNT_KEY_PREFIX + callId + AI_COUNT_KEY_SUFFIX;
+        try {
+            String value = redisTemplate.opsForValue().get(key);
+            if (value == null) {
+                return true;
+            }
+            long count = Long.parseLong(value);
+            return count < maxAiCalls;
+        } catch (NumberFormatException | DataAccessException e) {
+            log.warn("[M06] Redis AI call precheck failed, callId={}", callId, e);
+            return true;
+        }
+    }
+
+    private void incrementAiCallCount(String callId) {
         String key = AI_COUNT_KEY_PREFIX + callId + AI_COUNT_KEY_SUFFIX;
         try {
             Long count = redisTemplate.execute(AI_COUNT_SCRIPT,
                     Collections.singletonList(key),
                     String.valueOf(AI_COUNT_TTL_SECONDS));
-            return count == null || count <= maxAiCalls;
+            if (count != null && count > maxAiCalls) {
+                log.warn("[M06] AI call count exceeded after success, callId={}, count={}", callId, count);
+            }
         } catch (DataAccessException e) {
-            log.warn("[M06] Redis AI call count failed, callId={}", callId, e);
-            return true;
+            log.warn("[M06] Redis AI call count increment failed, callId={}", callId, e);
         }
     }
 

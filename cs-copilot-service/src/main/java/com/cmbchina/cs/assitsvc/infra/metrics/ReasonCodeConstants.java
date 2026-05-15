@@ -8,6 +8,9 @@ public final class ReasonCodeConstants {
     public static final String AI_TIMEOUT = "AI_TIMEOUT";
     public static final String AI_FAILED = "AI_FAILED";
     public static final String AI_CIRCUIT_BREAKER_OPEN = "AI_CIRCUIT_BREAKER_OPEN";
+    public static final String AI_NETWORK_FAIL = "AI_NETWORK_FAIL";
+    public static final String AI_BUSINESS_FAIL = "AI_BUSINESS_FAIL";
+    public static final String NO_CUSTOMER_HISTORY = "NO_CUSTOMER_HISTORY";
     public static final String INTENT_EMPTY = "INTENT_EMPTY";
     public static final String INTENT_NOT_MAPPED = "INTENT_NOT_MAPPED";
     public static final String RISK_DISABLED = "RISK_DISABLED";
