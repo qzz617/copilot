@@ -89,19 +89,16 @@ public class ExecutedStepsManager {
     }
 
     /**
-     * 清理已执行步骤。
+     * 通话结束时调用。
      *
-     * @param callId 通话 ID
+     * <p><b>行内规范</b>：Redis 不使用 delete 等阻塞命令，临时数据完全依赖 TTL 自动过期清理。
+     * 本方法仅保留日志和方法签名，作为通话生命周期事件钩子；如未来引入其他清理动作可在此扩展。
      */
     public void cleanup(String callId) {
         if (!StringUtils.hasText(callId)) {
             throw new IllegalArgumentException("callId must not be null or empty");
         }
-        try {
-            redisTemplate.delete(key(callId));
-        } catch (DataAccessException e) {
-            log.warn("[M06] Redis cleanup executed steps failed, callId={}", callId, e);
-        }
+        log.debug("[M06] Cleanup invoked, relying on TTL expiration, callId={}", callId);
     }
 
     private static String key(String callId) {

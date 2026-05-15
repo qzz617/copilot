@@ -8,7 +8,9 @@ import com.cmbchina.cs.assitsvc.infra.metrics.TriggerLogDao;
 import com.cmbchina.cs.assitsvc.infra.metrics.TriggerLogRecord;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.Instant;
@@ -31,6 +33,7 @@ public class FeedbackServiceImpl implements FeedbackService {
     private final MetricsService metricsService;
 
     @Override
+    @Transactional
     public FeedbackResult handleFeedback(FeedbackRequest request) {
         FeedbackResult validationResult = validateBasic(request);
         if (validationResult != null) {
@@ -43,17 +46,23 @@ public class FeedbackServiceImpl implements FeedbackService {
             return directiveResult;
         }
 
-        boolean alreadyEffective = feedbackLogDao.existsEffective(request.getDirectiveId());
-        boolean effective = !alreadyEffective
-                && triggerLogDao.markDirectiveConsumedIfOpen(request.getDirectiveId());
-        metricsService.recordFeedback(request, triggerLog, effective);
+        try {
+            boolean alreadyEffective = feedbackLogDao.existsEffective(request.getDirectiveId());
+            boolean effective = !alreadyEffective
+                    && triggerLogDao.markDirectiveConsumedIfOpen(request.getDirectiveId());
+            metricsService.recordFeedback(request, triggerLog, effective);
 
-        if (!effective) {
+            if (!effective) {
+                return FeedbackResult.success("DUPLICATE_RECORDED");
+            }
+
+            applyEffectiveFeedback(request);
+            return FeedbackResult.success("EFFECTIVE");
+        } catch (DataIntegrityViolationException e) {
+            log.info("[M11] Concurrent feedback collapsed as duplicate, directiveId={}",
+                    request.getDirectiveId());
             return FeedbackResult.success("DUPLICATE_RECORDED");
         }
-
-        applyEffectiveFeedback(request);
-        return FeedbackResult.success("EFFECTIVE");
     }
 
     private FeedbackResult validateBasic(FeedbackRequest request) {

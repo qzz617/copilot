@@ -7,7 +7,6 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
-import java.util.Arrays;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -48,15 +47,17 @@ public class MuteListManager {
         return StringUtils.hasText(actionId) && isMember(actionKey(callId), actionId);
     }
 
+    /**
+     * 通话结束时调用。
+     *
+     * <p><b>行内规范</b>：Redis 不使用 delete 等阻塞命令，临时数据完全依赖 TTL 自动过期清理。
+     * 本方法仅保留日志和方法签名，作为通话生命周期事件钩子；如未来引入其他清理动作可在此扩展。
+     */
     public void cleanup(String callId) {
         if (!StringUtils.hasText(callId)) {
-            return;
+            throw new IllegalArgumentException("callId must not be null or empty");
         }
-        try {
-            redisTemplate.delete(Arrays.asList(intentKey(callId), actionKey(callId)));
-        } catch (DataAccessException e) {
-            log.warn("[M11] Redis cleanup mute list failed, callId={}", callId, e);
-        }
+        log.debug("[M11] Cleanup invoked, relying on TTL expiration, callId={}", callId);
     }
 
     private void addToSet(String key, String value, int ttlSeconds) {

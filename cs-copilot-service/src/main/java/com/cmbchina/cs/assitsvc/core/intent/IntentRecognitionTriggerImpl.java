@@ -141,8 +141,6 @@ public class IntentRecognitionTriggerImpl implements IntentRecognitionTrigger {
         putIfHasText(sessionData, "accounts[0].accountNo", session.getAccountNo());
         putIfHasText(sessionData, "customer.address", session.getAddress());
         putIfHasText(sessionData, "customer.addressEncode", session.getAddressEncode());
-        putIfHasText(sessionData, "customerId", session.getCustomerId());
-        putIfHasText(sessionData, "customerType", session.getCustomerType());
 
         Map<String, Object> callMetaData = new HashMap<>();
         putIfHasText(callMetaData, "callId", session.getCallId());

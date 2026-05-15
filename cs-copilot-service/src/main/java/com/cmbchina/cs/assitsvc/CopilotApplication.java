@@ -6,6 +6,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.cloud.openfeign.EnableFeignClients;
 import org.springframework.kafka.annotation.EnableKafka;
 import org.springframework.scheduling.annotation.EnableScheduling;
+import org.springframework.transaction.annotation.EnableTransactionManagement;
 
 /**
  * 客服工作台 AI Copilot 服务入口。
@@ -24,6 +25,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @EnableFeignClients(basePackages = "com.cmbchina.cs.assitsvc.infra.feign")
 @EnableKafka
 @EnableScheduling
+@EnableTransactionManagement
 @MapperScan({
         "com.cmbchina.cs.assitsvc.config.mapper",
         "com.cmbchina.cs.assitsvc.infra.metrics.mapper"

@@ -101,10 +101,19 @@ public class ParamResolverServiceImpl implements ParamResolverService {
                 current = null;
             }
             if (current == null) {
-                return null;
+                break;
             }
         }
-        return current;
+        if (current != null) {
+            return current;
+        }
+
+        // 完整路径未命中时，兼容配置只写最后一段字段名的场景。
+        if (parts.length > 1) {
+            String lastSegment = parts[parts.length - 1];
+            return source.get(lastSegment);
+        }
+        return null;
     }
 
     private static Object getListValue(List<?> list, String indexText) {
