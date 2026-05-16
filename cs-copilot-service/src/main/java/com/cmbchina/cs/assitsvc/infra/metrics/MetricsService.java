@@ -82,10 +82,11 @@ public class MetricsService {
     /**
      * 记录反馈日志。
      */
-    public void recordFeedback(FeedbackRequest request, TriggerLogRecord triggerLog, boolean effective) {
+    public String recordFeedback(FeedbackRequest request, TriggerLogRecord triggerLog, boolean effective) {
+        String logId = generateId();
         try {
             feedbackLogDao.insert(FeedbackLogRecord.builder()
-                    .logId(generateId())
+                    .logId(logId)
                     .directiveId(request.getDirectiveId())
                     .triggerLogId(triggerLog == null ? null : triggerLog.getLogId())
                     .callId(request.getCallId())
@@ -97,8 +98,10 @@ public class MetricsService {
                     .isEffective(effective ? "Y" : "N")
                     .feedbackTime(parseInstant(request.getFeedbackTime()))
                     .build());
+            return logId;
         } catch (Exception e) {
             log.warn("[M16] Record feedback failed, directiveId={}", request.getDirectiveId(), e);
+            return null;
         }
     }
 

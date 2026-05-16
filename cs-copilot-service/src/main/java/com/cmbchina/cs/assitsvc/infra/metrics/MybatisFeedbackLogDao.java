@@ -30,4 +30,15 @@ public class MybatisFeedbackLogDao implements FeedbackLogDao {
                 .eq(FeedbackLogRecord::getIsEffective, "Y"));
         return count != null && count > 0;
     }
+
+    @Override
+    public void markEffective(String logId, String triggerLogId) {
+        if (!StringUtils.hasText(logId)) {
+            return;
+        }
+        feedbackLogMapper.update(null, Wrappers.<FeedbackLogRecord>lambdaUpdate()
+                .set(FeedbackLogRecord::getIsEffective, "Y")
+                .set(FeedbackLogRecord::getTriggerLogId, triggerLogId)
+                .eq(FeedbackLogRecord::getLogId, logId));
+    }
 }

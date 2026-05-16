@@ -8,4 +8,6 @@ public interface FeedbackLogDao {
     void insert(FeedbackLogRecord record);
 
     boolean existsEffective(String directiveId);
+
+    void markEffective(String logId, String triggerLogId);
 }

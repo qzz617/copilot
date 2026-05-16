@@ -1,7 +1,5 @@
 package com.cmbchina.cs.assitsvc.core.directive;
 
-import com.cmbchina.cs.assitsvc.core.param.ParamResolveResult;
-import com.cmbchina.cs.assitsvc.core.param.ParamResolverService;
 import com.cmbchina.cs.assitsvc.domain.ActionInfo;
 import com.cmbchina.cs.assitsvc.domain.BuildContext;
 import com.cmbchina.cs.assitsvc.domain.CopilotActionConfig;
@@ -10,6 +8,7 @@ import com.cmbchina.cs.assitsvc.domain.DisplayInfo;
 import com.cmbchina.cs.assitsvc.domain.FunctionInfo;
 import com.cmbchina.cs.assitsvc.domain.IntentInfo;
 import com.cmbchina.cs.assitsvc.domain.IntentResult;
+import com.cmbchina.cs.assitsvc.domain.ItemParam;
 import com.cmbchina.cs.assitsvc.domain.RiskInfo;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
@@ -17,7 +16,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.time.Instant;
-import java.util.Map;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -26,9 +25,6 @@ import java.util.UUID;
 @Service
 @RequiredArgsConstructor
 public class DirectiveBuilderServiceImpl implements DirectiveBuilderService {
-
-    private final ParamResolverService paramResolverService;
-    private final UrlBuilder urlBuilder;
 
     @Value("${copilot.directive.expire-seconds:30}")
     private int directiveExpireSeconds;
@@ -46,13 +42,6 @@ public class DirectiveBuilderServiceImpl implements DirectiveBuilderService {
         String openMode = action.getOpenMode();
         String targetUrl = resolveTargetUrl(action);
 
-        ParamResolveResult paramResult = paramResolverService.resolveParams(
-                action.getParams(), context.getParamContext(), targetUrl);
-        if (!paramResult.isSuccess()) {
-            throw new DirectiveBuildException("Required params missing: " + paramResult.getMissingParams());
-        }
-
-        String actionUrl = buildActionUrl(targetKind, targetUrl, paramResult.getParams());
         String actionType = deriveActionType(targetKind, openMode);
 
         return DirectiveDTO.builder()
@@ -66,7 +55,7 @@ public class DirectiveBuilderServiceImpl implements DirectiveBuilderService {
                 .function(buildFunction(action))
                 .display(buildDisplay(intentResult, action))
                 .action(buildAction(resolveTargetSource(action), targetKind, openMode, actionType,
-                        actionUrl, paramResult.getParams()))
+                        targetUrl, action.getParams()))
                 .risk(buildRisk(action.getRiskLevel()))
                 .build();
     }
@@ -100,15 +89,6 @@ public class DirectiveBuilderServiceImpl implements DirectiveBuilderService {
         }
     }
 
-    private String buildActionUrl(String targetKind, String targetUrl, Map<String, String> params) {
-        if ("URL".equalsIgnoreCase(targetKind)
-                || "IFRAME".equalsIgnoreCase(targetKind)
-                || "NEW_WINDOW".equalsIgnoreCase(targetKind)) {
-            return urlBuilder.buildUrl(targetUrl, params);
-        }
-        return targetUrl;
-    }
-
     private static IntentInfo buildIntent(IntentResult intentResult) {
         return IntentInfo.builder()
                 .intentCode(intentResult.getIntentCode())
@@ -136,14 +116,14 @@ public class DirectiveBuilderServiceImpl implements DirectiveBuilderService {
     }
 
     private static ActionInfo buildAction(String targetSource, String targetKind, String openMode, String actionType,
-                                          String actionUrl, Map<String, String> params) {
+                                          String actionUrl, List<ItemParam> paramConfigs) {
         return ActionInfo.builder()
                 .targetSource(targetSource)
                 .targetKind(targetKind)
                 .openMode(openMode)
                 .actionType(actionType)
                 .url(actionUrl)
-                .params(params)
+                .paramConfigs(paramConfigs)
                 .build();
     }
 

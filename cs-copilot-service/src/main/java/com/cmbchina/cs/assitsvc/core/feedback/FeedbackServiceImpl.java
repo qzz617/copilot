@@ -1,20 +1,11 @@
 package com.cmbchina.cs.assitsvc.core.feedback;
 
-import com.cmbchina.cs.assitsvc.core.intent.ExecutedStepsManager;
 import com.cmbchina.cs.assitsvc.domain.FeedbackRequest;
-import com.cmbchina.cs.assitsvc.infra.metrics.FeedbackLogDao;
 import com.cmbchina.cs.assitsvc.infra.metrics.MetricsService;
-import com.cmbchina.cs.assitsvc.infra.metrics.TriggerLogDao;
-import com.cmbchina.cs.assitsvc.infra.metrics.TriggerLogRecord;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
-
-import java.time.Instant;
-import java.util.Objects;
 
 /**
  * 反馈处理服务实现。
@@ -24,45 +15,24 @@ import java.util.Objects;
 @RequiredArgsConstructor
 public class FeedbackServiceImpl implements FeedbackService {
 
-    private static final int IGNORED_MUTE_TTL_SECONDS = 120;
-
-    private final TriggerLogDao triggerLogDao;
-    private final FeedbackLogDao feedbackLogDao;
-    private final ExecutedStepsManager stepsManager;
-    private final MuteListManager muteListManager;
     private final MetricsService metricsService;
+    private final FeedbackEffectProcessor feedbackEffectProcessor;
 
     @Override
-    @Transactional
     public FeedbackResult handleFeedback(FeedbackRequest request) {
         FeedbackResult validationResult = validateBasic(request);
         if (validationResult != null) {
             return validationResult;
         }
 
-        TriggerLogRecord triggerLog = triggerLogDao.findByDirectiveId(request.getDirectiveId());
-        FeedbackResult directiveResult = validateDirective(request, triggerLog);
-        if (directiveResult != null) {
-            return directiveResult;
-        }
-
+        String feedbackLogId = metricsService.recordFeedback(request, null, false);
         try {
-            boolean alreadyEffective = feedbackLogDao.existsEffective(request.getDirectiveId());
-            boolean effective = !alreadyEffective
-                    && triggerLogDao.markDirectiveConsumedIfOpen(request.getDirectiveId());
-            metricsService.recordFeedback(request, triggerLog, effective);
-
-            if (!effective) {
-                return FeedbackResult.success("DUPLICATE_RECORDED");
-            }
-
-            applyEffectiveFeedback(request);
-            return FeedbackResult.success("EFFECTIVE");
-        } catch (DataIntegrityViolationException e) {
-            log.info("[M11] Concurrent feedback collapsed as duplicate, directiveId={}",
-                    request.getDirectiveId());
-            return FeedbackResult.success("DUPLICATE_RECORDED");
+            feedbackEffectProcessor.applyAsync(request, feedbackLogId);
+        } catch (RuntimeException e) {
+            log.warn("[M11] Submit async feedback effect failed, directiveId={}",
+                    request.getDirectiveId(), e);
         }
+        return FeedbackResult.success("RECORDED");
     }
 
     private FeedbackResult validateBasic(FeedbackRequest request) {
@@ -81,36 +51,6 @@ public class FeedbackServiceImpl implements FeedbackService {
             return FeedbackResult.fail("INVALID_FEEDBACK_TYPE", request.getFeedbackType());
         }
         return null;
-    }
-
-    private FeedbackResult validateDirective(FeedbackRequest request, TriggerLogRecord triggerLog) {
-        if (triggerLog == null) {
-            return FeedbackResult.fail("DIRECTIVE_NOT_FOUND");
-        }
-        if (triggerLog.getExpireAt() != null && Instant.now().isAfter(triggerLog.getExpireAt())) {
-            return FeedbackResult.fail("DIRECTIVE_EXPIRED");
-        }
-        if (!Objects.equals(triggerLog.getCallId(), request.getCallId())
-                || !Objects.equals(triggerLog.getOperatorId(), request.getOperatorId())
-                || !Objects.equals(triggerLog.getIntentCode(), request.getIntentCode())
-                || !Objects.equals(triggerLog.getActionId(), request.getActionId())) {
-            log.warn("[M11] Feedback context mismatch, directiveId={}", request.getDirectiveId());
-            return FeedbackResult.fail("CONTEXT_MISMATCH");
-        }
-        return null;
-    }
-
-    private void applyEffectiveFeedback(FeedbackRequest request) {
-        String type = request.getFeedbackType();
-        if ("ACCEPTED".equals(type)) {
-            stepsManager.appendStep(request.getCallId(), request.getIntentCode(), request.getIntentName());
-        } else if ("IGNORED".equals(type)) {
-            muteListManager.muteIntent(request.getCallId(), request.getIntentCode(), IGNORED_MUTE_TTL_SECONDS);
-        } else if ("WRONG_INTENT".equals(type)) {
-            muteListManager.muteIntentForCall(request.getCallId(), request.getIntentCode());
-        } else if ("WRONG_FUNCTION".equals(type)) {
-            muteListManager.muteActionForCall(request.getCallId(), request.getActionId());
-        }
     }
 
     private static boolean isSupportedFeedbackType(String feedbackType) {

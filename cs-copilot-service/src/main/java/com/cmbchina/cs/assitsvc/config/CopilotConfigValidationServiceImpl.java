@@ -2,6 +2,7 @@ package com.cmbchina.cs.assitsvc.config;
 
 import com.cmbchina.cs.assitsvc.core.directive.UrlSecurityProperties;
 import com.cmbchina.cs.assitsvc.core.param.CookiePlaceholderValidator;
+import com.cmbchina.cs.assitsvc.core.param.StandardParamType;
 import com.cmbchina.cs.assitsvc.domain.ActionReference;
 import com.cmbchina.cs.assitsvc.domain.CopilotActionConfig;
 import com.cmbchina.cs.assitsvc.domain.CopilotConfigSnapshot;
@@ -109,7 +110,7 @@ public class CopilotConfigValidationServiceImpl implements CopilotConfigValidati
         } else if ("ROUTE".equalsIgnoreCase(action.getTargetKind()) && !StringUtils.hasText(targetUrl)) {
             errors.add("routePath missing, actionId=" + action.getActionId());
         }
-        validateCookieParams(action, targetUrl, errors);
+        validateParamConfigs(action, targetUrl, errors);
     }
 
     private void validateActionCombination(String actionId, String targetKind, String openMode, List<String> errors) {
@@ -146,12 +147,32 @@ public class CopilotConfigValidationServiceImpl implements CopilotConfigValidati
         }
     }
 
-    private void validateCookieParams(CopilotActionConfig action, String targetUrl, List<String> errors) {
+    private void validateParamConfigs(CopilotActionConfig action, String targetUrl, List<String> errors) {
         if (action.getParams() == null) {
             return;
         }
         for (ItemParam param : action.getParams()) {
-            if (param != null && "COOKIE_PLACEHOLDER".equals(param.getParamType())
+            if (param == null) {
+                errors.add("param config must not be null, actionId=" + action.getActionId());
+                continue;
+            }
+            if (!StringUtils.hasText(param.getParamType())) {
+                errors.add("paramType missing, actionId=" + action.getActionId()
+                        + ", paramKey=" + param.getParamKey());
+                continue;
+            }
+            try {
+                StandardParamType.valueOf(param.getParamType());
+            } catch (IllegalArgumentException e) {
+                errors.add("unsupported paramType, actionId=" + action.getActionId()
+                        + ", paramType=" + param.getParamType());
+                continue;
+            }
+            if (!StringUtils.hasText(param.getParamKey())) {
+                errors.add("paramKey missing, actionId=" + action.getActionId()
+                        + ", paramType=" + param.getParamType());
+            }
+            if ("COOKIE_PLACEHOLDER".equals(param.getParamType())
                     && !cookiePlaceholderValidator.validate(param, targetUrl)) {
                 errors.add("cookie placeholder not allowed, actionId=" + action.getActionId()
                         + ", paramKey=" + param.getParamKey());

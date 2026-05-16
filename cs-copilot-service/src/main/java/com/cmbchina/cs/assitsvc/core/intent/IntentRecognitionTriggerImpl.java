@@ -10,7 +10,6 @@ import com.cmbchina.cs.assitsvc.domain.CallSession;
 import com.cmbchina.cs.assitsvc.domain.DirectiveDTO;
 import com.cmbchina.cs.assitsvc.domain.IntentResult;
 import com.cmbchina.cs.assitsvc.domain.ItemCandidate;
-import com.cmbchina.cs.assitsvc.domain.ParamContext;
 import com.cmbchina.cs.assitsvc.infra.metrics.FilterStageConstants;
 import com.cmbchina.cs.assitsvc.infra.metrics.MetricsService;
 import com.cmbchina.cs.assitsvc.infra.metrics.ReasonCodeConstants;
@@ -21,9 +20,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
  * 意图识别触发编排实现。
@@ -95,7 +92,6 @@ public class IntentRecognitionTriggerImpl implements IntentRecognitionTrigger {
                     .operatorId(session.getOperatorId())
                     .configVersion(configCache.getCurrentVersion())
                     .action(candidate.getConfig())
-                    .paramContext(buildParamContext(session))
                     .build();
             DirectiveDTO directive = directiveBuilderService.build(context, intentResult);
             boolean published = pushService.publishDirectiveAsync(directive);
@@ -128,36 +124,6 @@ public class IntentRecognitionTriggerImpl implements IntentRecognitionTrigger {
             metricsService.recordTriggerFailure(callId, session, intentResult.getIntentCode(),
                     intentResult.getIntentName(), ReasonCodeConstants.PUSH_FAILED,
                     FilterStageConstants.PUSH, configCache.getCurrentVersion());
-        }
-    }
-
-    private static ParamContext buildParamContext(CallSession session) {
-        Map<String, Object> sessionData = new HashMap<>();
-        putIfHasText(sessionData, "customer.customerId", session.getCustomerId());
-        putIfHasText(sessionData, "customer.customerType", session.getCustomerType());
-        putIfHasText(sessionData, "customer.idNo", session.getIdNo());
-        putIfHasText(sessionData, "customer.noIdType", session.getNoIdType());
-        putIfHasText(sessionData, "customer.palmLifeUserId", session.getPalmLifeUserId());
-        putIfHasText(sessionData, "customer.phoneNo", session.getPhoneNo());
-        putIfHasText(sessionData, "customer.phoneNoNoZero", session.getPhoneNoNoZero());
-        putIfHasText(sessionData, "accounts[0].accountNo", session.getAccountNo());
-        putIfHasText(sessionData, "customer.address", session.getAddress());
-        putIfHasText(sessionData, "customer.addressEncode", session.getAddressEncode());
-
-        Map<String, Object> callMetaData = new HashMap<>();
-        putIfHasText(callMetaData, "callId", session.getCallId());
-        putIfHasText(callMetaData, "operatorId", session.getOperatorId());
-        putIfHasText(callMetaData, "calledNumber", session.getCalledNumber());
-
-        return ParamContext.builder()
-                .sessionData(sessionData)
-                .callMetaData(callMetaData)
-                .build();
-    }
-
-    private static void putIfHasText(Map<String, Object> target, String key, String value) {
-        if (StringUtils.hasText(value)) {
-            target.put(key, value);
         }
     }
 }

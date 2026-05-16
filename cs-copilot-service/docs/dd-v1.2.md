@@ -93,10 +93,10 @@
 | 5 | 意图树（配置文件） | Spring 配置文件加载，**支持 Admin 接口热加载**（P1-7） |
 | 6 | AI 接口对接 | Feign 调用，**调用前过滤只传客户消息**；**支持熔断**（P1-5） |
 | 7 | 意图-功能映射匹配 | 单 intentCode → 多 actionId 候选 |
-| 8 | 参数解析 | session/callMeta + **Cookie 受控占位符**（白名单 + 域名绑定，P0-4） |
-| 9 | 跳转指令构建与推送 | URL 含占位符 + **多重安全校验**（P0-5）+ WebSocket 推送 |
-| 10 | 反馈采集 | 4 种反馈 + **服务端指令校验 + 幂等约束**（P0-6） |
-| 11 | 前端 SDK | 浮窗 + 推荐卡片 + 5 种打开方式 + Cookie 替换 + **权限 API fail closed**（P1-20） |
+| 8 | 参数配置透传 | 纯 action 透传 `param_config_json`，后端不解析客户参数 |
+| 9 | 跳转指令构建与推送 | 构建基础 URL/route + `action.paramConfigs` + WebSocket 推送 |
+| 10 | 反馈采集 | 4 种反馈先记录返回；异步做指令校验、幂等生效和静默/已执行步骤更新（P0-6） |
+| 11 | 前端 SDK | 浮窗 + 推荐卡片 + 5 种打开方式 + 按 `paramType` 取值拼接 + **权限 API fail closed**（P1-20） |
 | 12 | 业务监控埋点 | 触发日志 + 反馈日志落库（**仅落库，不做看板**） |
 | 13 | **配置发布基础校验**（DD-V1.2 新增 P1-8） | 一键发布前校验必填字段、URL 白名单、组合合法性 |
 
@@ -212,8 +212,8 @@
 | M05 | 意图树加载器 | 后端 | 1.5 | + 热加载接口（P1-7）|
 | M06 | AI Feign Client + 过滤 + 熔断 | 后端 | 4 | + 熔断（P1-5），+ AI 计数（P1-4）|
 | M07 | 意图-功能匹配引擎 | 后端 | 4 | + 灰度白名单（P1-9）|
-| M08 | 参数解析器 | 后端 | 3 | Cookie 白名单（P0-4） |
-| M09 | 跳转指令构建器 | 后端 | 3 | + URL 多重校验（P0-5）|
+| M08 | 参数配置透传 | 后端 | 3 | Cookie 白名单（P0-4） |
+| M09 | 跳转指令构建器 | 后端 | 3 | + 基础目标构建 + paramConfigs 透传 |
 | M10 | WebSocket 推送 | 后端 | 2 | - |
 | M11 | 反馈接口 | 后端 | 3.5 | + 指令校验 + 幂等（P0-6）|
 | M12 | Copilot 配置发布 + 发布前校验 | 后端 | 4.5 | + action/mapping/item 一致性校验（P1-8）|
@@ -281,7 +281,7 @@ graph TB
             M04[M04 callId 绑定]
             M06[M06 AI Feign Client<br/>调用前过滤]
             M07[M07 意图-功能匹配]
-            M08[M08 参数解析<br/>含 Cookie 占位符]
+            M08[M08 参数配置透传<br/>paramConfigs]
             M09[M09 指令构建器]
             M16[M16 监控埋点]
         end
@@ -374,10 +374,10 @@ graph LR
 | M05 意图树加载器 | 启动时从配置文件加载 | Spring Resource | IntentTree 内存对象 |
 | M06 AI Feign Client | Feign 调用 + **调用前过滤** | history+intentTree | IntentRecognitionOutcome（含 IntentResult 或失败原因） |
 | M07 意图-功能匹配 | CopilotConfigSnapshot 反向索引查询 | intentCode | List<ItemCandidate> |
-| M08 参数解析器 | 上下文取值 + Cookie 占位符标记 | paramList + ctx | ResolvedParams |
-| M09 指令构建器 | URL 拼接（含占位符）+ actionType 派生 | candidate + params | DirectiveDTO |
+| M08 参数配置透传 | 不读取客户值，透传 `param_config_json` | action.param_config_json | List<ItemParam> |
+| M09 指令构建器 | 基础目标 URL/route + actionType 派生 + paramConfigs | candidate + action | DirectiveDTO |
 | M10 WebSocket 推送 | 推送指令到前端 | DirectiveDTO | 前端 push |
-| M11 反馈接口 | 反馈采集 + 持久化 + 静默 | FeedbackDTO | DB |
+| M11 反馈接口 | 反馈采集先记录返回；异步生效静默/已执行步骤 | FeedbackDTO | DB + Redis |
 | M16 业务监控埋点 | 触发/反馈日志落库 | 业务事件 | DB |
 
 ### 6.2 前端模块职责矩阵
@@ -388,7 +388,7 @@ graph LR
 | M14-2 浮窗 UI | 展示推荐卡片、状态提示 |
 | M14-3 推荐卡片组件 | 展示意图、功能、确认按钮 |
 | M14-4 权限过滤 | **基于工作台已有权限体系，过滤无权功能不展示** |
-| M14-5 Cookie 占位符替换 | 把指令中 `${COOKIE.xxx}` 替换为实际 cookie 值 |
+| M14-5 参数取值与拼接 | 按 `paramType` 从 Cookie/工作台上下文取值，并按 `paramKey` 拼 URL 或组件 props |
 | M14-6 反馈上报 | 4 种反馈类型上报 |
 | M15 五种打开方式 | URL/路由/组件/iframe/新窗口 |
 
@@ -412,19 +412,18 @@ flowchart TD
     I --> J[List ItemCandidate]
     J --> K[过滤禁用 action + 静默列表]
     K --> L[取最高优先级]
-    L --> M[参数解析<br/>session/callMeta + Cookie 占位符]
-    M --> N[拼接 URL<br/>含占位符]
-    N --> O[构建 DirectiveDTO]
-    O --> P[WebSocket 推送]
-    P --> Q[前端 SDK 接收]
-    Q --> R[**前端权限过滤**]
-    R -.有权限.-> S[展示推荐]
-    R -.无权限.-> X[静默丢弃]
+    L --> M[透传 action.paramConfigs<br/>不解析客户参数]
+    M --> N[构建 DirectiveDTO<br/>URL/route 保持基础目标]
+    N --> O[WebSocket 推送]
+    O --> P[前端 SDK 接收]
+    P --> Q[**前端权限过滤**]
+    Q -.有权限.-> S[展示推荐]
+    Q -.无权限.-> X[静默丢弃]
     S --> T[坐席点击打开]
-    T --> U[Cookie 占位符替换]
+    T --> U[按 paramType 前端取值并拼接]
     U --> V[执行 5 种打开方式]
     V --> W[反馈 ACCEPTED]
-    W --> Y[落库 + 业务埋点]
+    W --> Y[反馈先记录返回<br/>异步让反馈生效]
 ```
 
 ### 7.2 配置数据流（Copilot 独立配置）
@@ -896,12 +895,11 @@ public class CallSessionManager {
 
     public void bind(CallSessionDTO session) {
         String key = key(session.getCallId());
-        Map<String, String> fields = Map.of(
-            "operatorId", session.getOperatorId(),
-            "customerId", session.getCustomerId(),
-            "customerType", session.getCustomerType(),
-            "sessionStartTime", String.valueOf(System.currentTimeMillis())
-        );
+        Map<String, String> fields = new HashMap<>();
+        fields.put("operatorId", session.getOperatorId());
+        fields.put("customerId", session.getCustomerId());
+        fields.put("customerType", session.getCustomerType());
+        fields.put("sessionStartTime", String.valueOf(System.currentTimeMillis()));
         redisTemplate.opsForHash().putAll(key, fields);
         redisTemplate.expire(key, Duration.ofMinutes(30));
     }
@@ -1291,7 +1289,9 @@ public class ExecutedStepsManager {
         List<String> raw = redisTemplate.opsForList()
             .range("copilot:steps:" + callId, 0, -1);
         if (raw == null) return Collections.emptyList();
-        return raw.stream().map(s -> JSON.parseObject(s, ExecutedStep.class)).toList();
+        return raw.stream()
+            .map(s -> JSON.parseObject(s, ExecutedStep.class))
+            .collect(Collectors.toList());
     }
 
     public void cleanup(String callId) {
@@ -1410,11 +1410,11 @@ if (!grayWhitelistFilter.isOperatorEnabled(operatorId)) {
 
 ---
 
-## 15. 参数解析（M08）— 含 Cookie 占位符
+## 15. 参数配置透传（M08）— 含 Cookie 受控参数
 
 ### 15.1 标准参数枚举
 
-按你的指示**情况 B**：保留从 session/callMeta 取参数的能力（即存量 13 个 param_type），不实现 ASR 实体抽取。
+保留存量 13 个 `param_type` 的配置语义，但本期纯 action 不在后端从 session/callMeta 取客户参数值；后端只校验配置并透传给前端，前端按 `paramType` 从 Cookie / 工作台上下文取值。不实现 ASR 实体抽取。
 
 ```java
 public enum StandardParamType {
@@ -1475,19 +1475,17 @@ public enum StandardParamType {
   param_key=token        （URL 参数名）
   param_value=token      （cookie 字段名）
 
-服务端解析后输出：
-  paramKey=token
-  paramValue=${COOKIE.token}
+服务端输出：
+  action.paramConfigs = 原始参数配置数组（paramType/paramKey/paramValue）
 
-服务端拼接 URL：
-  https://target/page?custNo=C123&token=${COOKIE.token}
+服务端不拼接客户参数值：
+  action.url = https://target/page
 
 前端拿到指令后：
   ① 校验 token 在 Cookie 白名单内 → 通过
   ② 校验 target/page 域名允许使用 token → 通过
-  ③ 从 cookie 读取 token 字段
-  ④ 替换 ${COOKIE.token} 为实际值
-  ⑤ 得到最终 URL：
+  ③ 根据 paramType 从 Cookie / 工作台上下文读取实际值
+  ④ 按 paramKey 拼接最终 URL：
      https://target/page?custNo=C123&token=eyJhbGciOiJ...
 ```
 
@@ -1516,7 +1514,7 @@ copilot:
 
 #### 服务端校验
 
-> 配置发布前（M12 一键发布时）和运行时（M08 解析时）双重校验：
+> 配置发布前（M12 一键发布时）和运行时加载配置时校验 Cookie 配置合法性；运行时指令构建不读取 Cookie 值：
 
 ```java
 @Component
@@ -1581,59 +1579,34 @@ DD-V1.2 调整：[A-Za-z0-9_.-]+（兼容含 .- 的 cookie 名）
 
 ```mermaid
 flowchart LR
-    A[配置: param_type=COOKIE_PLACEHOLDER<br/>param_key=token<br/>param_value=token] --> B[M08 参数解析]
-    B --> C[paramKey=token<br/>paramValue=占位符 COOKIE.token]
-    C --> D[M09 拼接 URL]
-    D --> E[URL: ?token=占位符]
-    E --> F[WebSocket 推送给前端]
-    F --> G[前端 SDK 接收]
-    G --> H[读取 cookie.token 实际值]
-    H --> I[替换占位符]
-    I --> J[最终 URL]
+    A[配置: param_type=COOKIE_PLACEHOLDER<br/>param_key=token<br/>param_value=token] --> B[M12/运行时配置校验]
+    B --> C[M09 指令构建]
+    C --> D[action.paramConfigs 透传]
+    D --> E[WebSocket 推送给前端]
+    E --> F[前端 SDK 接收]
+    F --> G[按 paramType 读取 Cookie/工作台上下文]
+    G --> H[按 paramKey 拼接最终 URL/Props]
 ```
 
-### 15.3 参数解析器实现
+### 15.3 参数配置透传
 
 ```java
 @Component
-public class ParamResolver {
+public class DirectiveBuilder {
 
     /**
-     * 根据 cs_copilot_action.param_config_json 列表解析最终参数 map
+     * 纯 action 不在后端解析客户参数。
+     * 后端只把 param_config_json 结构化透传给前端，由前端按 paramType 取值。
      */
-    public Map<String, String> resolveParams(
-            List<ItemParam> paramList,
-            ParamContext ctx) {
-        Map<String, String> result = new LinkedHashMap<>();
-
-        for (ItemParam param : paramList) {
-            StandardParamType type;
-            try {
-                type = StandardParamType.valueOf(param.getParamType());
-            } catch (IllegalArgumentException e) {
-                log.warn("Unknown param_type: {}", param.getParamType());
-                continue;
-            }
-
-            String value = resolveValue(type, param, ctx);
-            if (value != null) {
-                result.put(param.getParamKey(), value);
-            }
-        }
-        return result;
-    }
-
-    private String resolveValue(StandardParamType type, ItemParam param,
-                                ParamContext ctx) {
-        return switch (type.getSourceType()) {
-            case LITERAL -> param.getParamValue();
-            case SESSION -> ctx.getSession().getValueByPath(type.getDefaultSourceKey());
-            case CALL_META -> ctx.getCallMeta().getValueByPath(type.getDefaultSourceKey());
-            // DD-V1.1 新增
-            case COOKIE -> "${COOKIE." + param.getParamValue() + "}";
-                          // param_value 存 cookie 字段名
-                          // 输出占位符给前端替换
-        };
+    public ActionInfo buildAction(CopilotActionConfig action) {
+        return ActionInfo.builder()
+            .targetSource("ACTION")
+            .targetKind(action.getTargetKind())
+            .openMode(action.getOpenMode())
+            .actionType(deriveActionType(action))
+            .url(resolveTargetUrl(action))      // base URL / routePath，不拼客户参数
+            .paramConfigs(action.getParams())  // 原 param_config_json
+            .build();
     }
 }
 ```
@@ -1646,8 +1619,8 @@ public class ParamResolver {
   ✗ LLM 兜底实体抽取
 
 参数缺失处理：
-  - 必填参数缺失 → 不展示推荐
-  - 选填参数缺失 → 跳转 URL 不带该参数，坐席页面手动输入
+  - 后端不因客户参数缺失阻断推荐
+  - 前端按 paramType 取值；缺失时按前端打开逻辑决定阻断、跳过或提示坐席补录
 ```
 
 ---
@@ -1716,17 +1689,7 @@ public class ParamResolver {
 @Component
 public class DirectiveBuilder {
 
-    @Autowired private UrlBuilder urlBuilder;
-    @Autowired private ParamResolver paramResolver;
-
     public DirectiveDTO build(BuildContext bc) {
-        Map<String, String> params = paramResolver.resolveParams(
-            bc.getItem().getParams(), bc.getParamContext());
-
-        // URL 拼接，含 Cookie 占位符
-        String urlWithPlaceholders = urlBuilder.buildUrl(
-            bc.getItem().getUrl(), params);
-
         String actionType = deriveActionType(
             bc.getItem().getCopilotExt().getTargetKind(),
             bc.getItem().getCopilotExt().getOpenMode());
@@ -1745,8 +1708,8 @@ public class DirectiveBuilder {
                 .targetKind(bc.getItem().getCopilotExt().getTargetKind())
                 .openMode(bc.getItem().getCopilotExt().getOpenMode())
                 .actionType(actionType)
-                .url(urlWithPlaceholders)
-                .params(params)
+                .url(bc.getItem().getUrl())
+                .paramConfigs(bc.getItem().getParams())
                 .build())
             .risk(buildRisk(bc))
             .build();
@@ -1872,17 +1835,20 @@ public class UrlBuilder {
         
         log.warn("Param key conflict: {}, policy: {}", conflicts, sameKeyPolicy);
         
-        return switch (sameKeyPolicy) {
-            case "OVERRIDE" -> params;  // 默认：params 覆盖
-            case "PRESERVE" -> {
-                Map<String, String> result = new LinkedHashMap<>(params);
-                conflicts.forEach(result::remove);
-                yield result;
+        if ("OVERRIDE".equals(sameKeyPolicy)) {
+            return params;
+        }
+        if ("PRESERVE".equals(sameKeyPolicy)) {
+            Map<String, String> result = new LinkedHashMap<>(params);
+            for (String conflict : conflicts) {
+                result.remove(conflict);
             }
-            case "ERROR" -> throw new UrlValidationException(
-                "Param key conflict: " + conflicts);
-            default -> throw new IllegalStateException();
-        };
+            return result;
+        }
+        if ("ERROR".equals(sameKeyPolicy)) {
+            throw new UrlValidationException("Param key conflict: " + conflicts);
+        }
+        throw new IllegalStateException();
     }
 }
 ```
@@ -1946,10 +1912,10 @@ public class CopilotPushService {
 
 | feedbackType | 含义 | 后端处理 |
 |--------------|------|---------|
-| ACCEPTED | 坐席点击打开 | 持久化日志 + 追加 executedSteps |
-| IGNORED | 坐席忽略 | 60s 内不重复推荐相同 intentCode |
-| WRONG_INTENT | 意图识别错误 | 本通话内静默该 intentCode |
-| WRONG_FUNCTION | 意图对，功能映射错 | 本通话内静默该 actionId |
+| ACCEPTED | 坐席点击打开 | 先记录反馈事件并返回；异步校验通过后追加 executedSteps |
+| IGNORED | 坐席忽略 | 先记录反馈事件并返回；异步校验通过后 120s 内不重复推荐相同 intentCode |
+| WRONG_INTENT | 意图识别错误 | 先记录反馈事件并返回；异步校验通过后本通话内静默该 intentCode |
+| WRONG_FUNCTION | 意图对，功能映射错 | 先记录反馈事件并返回；异步校验通过后本通话内静默该 actionId |
 
 ### 17.2 反馈接口
 
@@ -1960,84 +1926,89 @@ public class CopilotPushService {
 ```mermaid
 flowchart TD
     A[POST /copilot/feedback] --> B[校验参数]
-    B --> C[持久化反馈日志<br/>cs_copilot_feedback_log]
-    C --> D{feedbackType?}
-    D -.ACCEPTED.-> E[追加 executedSteps]
-    D -.IGNORED.-> F[加倍 cooldown]
-    D -.WRONG_INTENT.-> G[静默该 intentCode 整通通话]
-    D -.WRONG_FUNCTION.-> H[静默该 actionId 整通通话]
-    E --> END[返回成功]
-    F --> END
-    G --> END
-    H --> END
+    B --> C[Best-effort 记录反馈事件<br/>cs_copilot_feedback_log is_effective=N]
+    C --> D[立即返回 RECORDED]
+    C -.异步.-> E[反查 trigger_log 并校验上下文/过期]
+    E --> F[CAS 标记 directive_status=CONSUMED]
+    F --> G{feedbackType?}
+    G -.ACCEPTED.-> H[追加 executedSteps]
+    G -.IGNORED.-> I[120s 静默 intentCode]
+    G -.WRONG_INTENT.-> J[整通话静默 intentCode]
+    G -.WRONG_FUNCTION.-> K[整通话静默 actionId]
+    H --> L[更新 feedback_log is_effective=Y]
+    I --> L
+    J --> L
+    K --> L
 ```
 
 ### 17.4 关键代码骨架
 
 ```java
+@Slf4j
 @Service
 public class FeedbackService {
 
-    @Autowired private FeedbackLogDao feedbackLogDao;
-    @Autowired private TriggerLogDao triggerLogDao;
-    @Autowired private ExecutedStepsManager stepsManager;
-    @Autowired private MuteListManager muteListManager;
     @Autowired private MetricsService metricsService;
+    @Autowired private FeedbackEffectProcessor feedbackEffectProcessor;
 
     public FeedbackResult handleFeedback(FeedbackRequest req) {
-        // 【DD-V1.2 P0-6】1. 服务端指令校验
+        validateBasic(req);
+        // 1. 先记录反馈事件，失败只打日志，不阻塞接口返回
+        String feedbackLogId = metricsService.recordFeedback(req, null, false);
+        // 2. 异步让反馈生效
+        try {
+            feedbackEffectProcessor.applyAsync(req, feedbackLogId);
+        } catch (RuntimeException e) {
+            log.warn("[M11] Submit async feedback effect failed, directiveId={}", req.getDirectiveId(), e);
+        }
+        return FeedbackResult.success("RECORDED");
+    }
+}
+
+@Service
+public class FeedbackEffectProcessor {
+
+    @Async("feedbackEffectExecutor")
+    public void applyAsync(FeedbackRequest req, String feedbackLogId) {
         TriggerLogRecord triggerLog = triggerLogDao.findByDirectiveId(req.getDirectiveId());
         if (triggerLog == null) {
-            return FeedbackResult.fail("DIRECTIVE_NOT_FOUND");
+            return;
         }
-        
-        // 1.1 过期校验
         if (triggerLog.getExpireAt() != null 
                 && Instant.now().isAfter(triggerLog.getExpireAt())) {
-            return FeedbackResult.fail("DIRECTIVE_EXPIRED");
+            return;
         }
-        
-        // 1.2 上下文匹配校验
         if (!triggerLog.getCallId().equals(req.getCallId())
                 || !Objects.equals(triggerLog.getOperatorId(), req.getOperatorId())
                 || !Objects.equals(triggerLog.getIntentCode(), req.getIntentCode())
-                || !Objects.equals(triggerLog.getItemId(), req.getItemId())) {
-            log.warn("Feedback context mismatch: directiveId={}, req={}, log={}", 
-                req.getDirectiveId(), req, triggerLog);
-            return FeedbackResult.fail("CONTEXT_MISMATCH");
+                || !Objects.equals(triggerLog.getActionId(), req.getActionId())) {
+            return;
         }
-        
-        // 【DD-V1.2 P1-14】2. 幂等控制：检查是否已有有效反馈
-        boolean alreadyEffective = feedbackLogDao.existsEffective(req.getDirectiveId());
-        boolean isEffective = !alreadyEffective;  // 首次为 Y，后续为 N
-        
-        // 3. 持久化（含 trigger_log_id 反查 - P1-15）
-        FeedbackLog logEntity = toLog(req);
-        logEntity.setTriggerLogId(triggerLog.getLogId());
-        logEntity.setIsEffective(isEffective ? "Y" : "N");
-        feedbackLogDao.insert(logEntity);
-        metricsService.recordFeedback(req.getFeedbackType());
-        
-        // 4. 仅有效反馈影响业务状态
-        if (!isEffective) {
-            return FeedbackResult.success("DUPLICATE_RECORDED");
+        if (!triggerLogDao.markDirectiveConsumedIfOpen(req.getDirectiveId())) {
+            return;
         }
-        
         switch (req.getFeedbackType()) {
-            case "ACCEPTED" -> stepsManager.appendStep(
-                req.getCallId(), req.getIntentCode(), req.getIntentName());
-            case "IGNORED" -> muteListManager.muteIntent(
-                req.getCallId(), req.getIntentCode(), Duration.ofSeconds(120));
-            case "WRONG_INTENT" -> muteListManager.muteIntentForCall(
-                req.getCallId(), req.getIntentCode());
-            case "WRONG_FUNCTION" -> muteListManager.muteItemForCall(
-                req.getCallId(), req.getItemId());
+            case "ACCEPTED":
+                stepsManager.appendStep(req.getCallId(), req.getIntentCode(), req.getIntentName());
+                break;
+            case "IGNORED":
+                muteListManager.muteIntent(req.getCallId(), req.getIntentCode(), 120);
+                break;
+            case "WRONG_INTENT":
+                muteListManager.muteIntentForCall(req.getCallId(), req.getIntentCode());
+                break;
+            case "WRONG_FUNCTION":
+                muteListManager.muteActionForCall(req.getCallId(), req.getActionId());
+                break;
+            default:
+                break;
         }
-        
-        return FeedbackResult.success("EFFECTIVE");
+        feedbackLogDao.markEffective(feedbackLogId, triggerLog.getLogId());
     }
 }
 ```
+
+反馈异步生效使用独立 `feedbackEffectExecutor`，默认核心线程数 4、最大线程数 16、队列 1000，可通过 `copilot.feedback.async.*` 调整。异步任务提交失败时只记录 `[M11]` 日志，不影响反馈接口返回。
 
 #### 数据库幂等保证
 
@@ -2066,7 +2037,7 @@ public class MuteListManager {
                 "copilot:mute:intent:" + callId, intentCode));
     }
 
-    // 类似地：muteItemForCall / isItemMuted
+    // 类似地：muteActionForCall / isActionMuted
 }
 ```
 
@@ -2208,7 +2179,7 @@ GRAY_WHITELIST             灰度白名单层
 INTENT_RECOGNITION         意图识别层
 INTENT_MAPPING             意图映射层
 CONDITION_RULE             条件规则层
-PARAM_RESOLVE              参数解析层
+PARAM_CONFIG               参数配置透传层
 URL_VALIDATION             URL 校验层
 PUSH                       推送层
 FRONT_PERMISSION           前端权限层
@@ -2237,7 +2208,7 @@ graph TB
     PERM[M14-4 权限过滤]
     UI[M14-2 浮窗 UI]
     CARD[M14-3 推荐卡片]
-    COOKIE[M14-5 Cookie 占位符替换]
+    COOKIE[M14-5 按 paramType 前端取值]
     FEEDBACK[M14-6 反馈上报]
     OPEN[M15 五种打开方式]
 
@@ -2260,7 +2231,7 @@ flowchart TD
     C -.无权限.-> SKIP[静默丢弃]
     C -.有权限.-> D[展示推荐卡片]
     D --> E{坐席动作}
-    E -.点击打开.-> F[Cookie 占位符替换]
+    E -.点击打开.-> F[按 paramType 前端取值并拼接]
     F --> G[执行 5 种打开方式]
     G --> H[反馈 ACCEPTED]
     E -.关闭.-> I[反馈 IGNORED]
@@ -2339,9 +2310,9 @@ const handleDirective = (directive) => {
 };
 ```
 
-### 19.4 Cookie 占位符替换（M14-5）
+### 19.4 参数取值与拼接（M14-5）
 
-> DD-V1.1 关键设计：URL 中 `${COOKIE.xxx}` 占位符由前端从 cookie 读取实际值后替换。
+> DD-V1.2 关键设计：纯 action 的 `action.paramConfigs` 由后端透传，前端按 `paramType` 从 Cookie / 工作台上下文读取实际值，并按 `paramKey` 拼接到 URL 或组件 props。
 
 ```javascript
 const COOKIE_PATTERN = /\$\{COOKIE\.(\w+)\}/g;
@@ -2388,44 +2359,62 @@ const replaceCookiePlaceholdersInUrl = (url) => {
   return { url: finalUrl, blocked, reason: blockReason };
 };
 
-// DD-V1.2 P2-6：params 字段语义明确
-// - 当 actionType 是 OPEN_URL/OPEN_IFRAME 等 URL 场景：params 仅用于回显或日志，URL 已包含全部参数（已 encode）
-// - 当 actionType 是 OPEN_COMPONENT_POPUP/DRAWER：params 作为 Vue 组件 props 传入，**不应 encode**
-const replaceCookieInComponentProps = (params) => {
+// DD-V1.2 调整：后端不解析客户参数，只透传 action.paramConfigs。
+// 前端按 paramType 从 Cookie / 工作台上下文取值，再按 paramKey 拼 URL 或组件 props。
+const resolveValueByParamType = (param) => {
+  if (param.paramType === 'COOKIE_PLACEHOLDER') {
+    return getCookie(param.paramValue);
+  }
+  if (param.paramType === 'CUST_ID_NO' || param.paramType === 'MOBPHN1' || param.paramType === 'ACCOUNT_NO') {
+    return workbenchContext.getValue(param.paramType);
+  }
+  if (param.paramType === 'EXP') {
+    return param.paramValue;
+  }
+  return workbenchContext.getValue(param.paramType);
+};
+
+const buildParamsFromConfigs = (paramConfigs = []) => {
   const result = {};
-  for (const [k, v] of Object.entries(params)) {
-    if (typeof v === 'string') {
-      result[k] = v.replace(COOKIE_PATTERN, (m, n) => {
-        const val = getCookie(n);
-        return val ?? m;  // 组件 props 不 encode
-      });
-    } else {
-      result[k] = v;
+  for (const param of paramConfigs) {
+    const value = resolveValueByParamType(param);
+    if (value !== undefined && value !== null && value !== '') {
+      result[param.paramKey] = value;
     }
   }
   return result;
 };
 
+const appendParamsToUrl = (url, params) => {
+  const result = new URL(url, window.location.origin);
+  Object.entries(params).forEach(([key, value]) => {
+    result.searchParams.set(key, value);
+  });
+  return result.toString();
+};
+
 // 打开前替换
 const openWithReplacement = (directive) => {
+  const params = buildParamsFromConfigs(directive.action.paramConfigs);
   if (directive.action.actionType.startsWith('OPEN_URL') 
       || directive.action.actionType === 'OPEN_IFRAME'
       || directive.action.actionType === 'OPEN_NEW_WINDOW') {
     // URL 场景
-    const result = replaceCookiePlaceholdersInUrl(directive.action.url);
+    const targetUrl = appendParamsToUrl(directive.action.url, params);
+    const result = replaceCookiePlaceholdersInUrl(targetUrl);
     if (result.blocked) {
       showError(`无法打开：${result.reason}`);
-      submitFeedback(directive, 'OPEN_BLOCKED', result.reason);
+      reportOpenBlocked(directive, result.reason);
       return;
     }
     executeOpen(directive.action.actionType, result.url, null);
   } else if (directive.action.actionType.startsWith('OPEN_COMPONENT_')) {
     // 组件场景
-    const finalProps = replaceCookieInComponentProps(directive.action.params);
-    executeOpen(directive.action.actionType, null, finalProps);
+    executeOpen(directive.action.actionType, null, params);
   } else {
     // 路由场景
-    const result = replaceCookiePlaceholdersInUrl(directive.action.url);
+    const targetUrl = appendParamsToUrl(directive.action.url, params);
+    const result = replaceCookiePlaceholdersInUrl(targetUrl);
     if (result.blocked) {
       showError(`无法打开：${result.reason}`);
       return;
@@ -2678,7 +2667,7 @@ CREATE INDEX idx_copilot_action_menu_item
 | floating_tip_text | varchar(256) | 否 | 跳转前提示 |
 | risk_level | varchar(16) | 是 | LOW / MEDIUM / HIGH / DISABLED，默认 LOW |
 | icon_url | varchar(256) | 否 | 图标 URL |
-| param_config_json | text | 否 | 纯 action 参数配置；关联菜单项时不使用 |
+| param_config_json | text | 否 | 纯 action 参数配置；后端透传到 `action.paramConfigs`，由前端按 `paramType` 取值；关联菜单项时不使用 |
 | created_by / created_name / created_time | - | 是 | 创建审计 |
 | updated_by / updated_name / updated_time | - | 否 | 更新审计 |
 
@@ -3011,7 +3000,7 @@ flowchart TD
 
 | 场景 | 运行时目标来源 | 参数来源 | action 目标字段用途 |
 |------|---------------|----------|--------------------|
-| `menu_item_id` 为空 | `cs_copilot_action` | `param_config_json` | 必填，作为事实来源 |
+| `menu_item_id` 为空 | `cs_copilot_action` | `param_config_json` 透传为 `action.paramConfigs`，前端取值 | 必填，作为事实来源 |
 | `menu_item_id` 不为空 | 前端现有快捷导航逻辑 | 快捷导航既有逻辑 | 可为空或作为快照，不作为事实来源 |
 
 关联菜单项时，前端指令只携带 `menuItemId`，由前端复用现有快捷导航打开逻辑。服务端不把 `cs_menu_item.url/page_id/page_title/sys_flag` 翻译成 Copilot 跳转字段。
@@ -3030,7 +3019,7 @@ flowchart TD
 | 菜单项存在性 | 不校验 | `cs_menu_item.item_id` 必须存在 |
 | 菜单项启用状态 | 不校验 | `cs_menu_item.enabled` 必须为 `Y` |
 | 快照一致性 | 不校验 | `item_snapshot_json` 不为空时比较 itemName/url/sysFlag/pageId/pageTitle/enabled |
-| 参数来源 | 校验 `param_config_json` 格式 | 不校验，沿用现有快捷导航打开链路 |
+| 参数来源 | 校验 `param_config_json` 格式、`paramType` 枚举和 Cookie 白名单；不校验实际客户值 | 不校验，沿用现有快捷导航打开链路 |
 
 校验失败策略：
 
@@ -3140,8 +3129,9 @@ flowchart TD
 | action.targetKind | string | 条件必填 | ACTION 场景必填；URL/ROUTE/IFRAME/NEW_WINDOW |
 | action.openMode | string | 条件必填 | ACTION 场景必填；CURRENT_TAB/NEW_TAB/WINDOW/IFRAME |
 | action.actionType | string | 是 | 派生字段，前端按此选择执行器；MENU_ITEM 场景为 OPEN_MENU_ITEM |
-| action.url | string | 否 | 含 `${COOKIE.xxx}` 占位符的 URL |
-| action.params | object | 否 | 参数 map（值含 `${COOKIE.xxx}`） |
+| action.url | string | 否 | 目标基础 URL / routePath；纯 action 不在后端拼接客户参数 |
+| action.params | object | 否 | 后端已解析参数 map，纯 action 通常为空，保留兼容 |
+| action.paramConfigs | array | 否 | 纯 action 参数配置透传，前端按 `paramType` 取值并按 `paramKey` 拼接 |
 | risk.riskLevel | string | 是 | LOW/MEDIUM/HIGH |
 | risk.needConfirm | boolean | 是 | 派生：MEDIUM/HIGH 时为 true |
 
@@ -3445,7 +3435,7 @@ Content-Type: application/json
 |------|------|
 | COP_INTENT_NOT_MAPPED | AI 返回的 intentCode 在映射表中找不到 |
 | COP_RISK_DISABLED | 风险等级 DISABLED，不展示 |
-| COP_PARAM_MISSING | 必填参数缺失 |
+| COP_PARAM_MISSING | 前端打开阶段发现必填参数缺失；后端纯 action 不因客户参数缺失阻断指令 |
 | COP_URL_VALIDATION_FAIL | URL 白名单校验失败 |
 | COP_AI_TIMEOUT | AI 接口超时 |
 | COP_AI_FAILED | AI 接口业务失败 |
@@ -3463,12 +3453,12 @@ Content-Type: application/json
 
 ```json
 {
-  "code": "COP_PARAM_MISSING",
-  "message": "Required parameter missing: custNo",
+  "code": "COP_URL_VALIDATION_FAIL",
+  "message": "Target URL domain not allowed",
   "details": {
     "actionId": "act_travel_declare",
     "menuItemId": 12345,
-    "missingParams": ["custNo"]
+    "domain": "example.com"
   }
 }
 ```
@@ -3511,8 +3501,8 @@ sequenceDiagram
     CFG-->>SVC: List ItemCandidate
     SVC->>SVC: 过滤禁用 action + 静默列表
     SVC->>SVC: 取最高优先级
-    SVC->>SVC: M08 解析参数(含 Cookie 占位符)
-    SVC->>SVC: M09 拼接 URL + 构建 DirectiveDTO
+    SVC->>SVC: M08 选择候选 action
+    SVC->>SVC: M09 透传 paramConfigs + 构建 DirectiveDTO
     SVC->>WS: M10 推送指令
     SVC->>SVC: M16 触发日志埋点
 
@@ -3525,12 +3515,15 @@ sequenceDiagram
 
     Note over OP: 坐席点击"打开"
     OP->>FE: click
-    FE->>FE: M14-5 Cookie 占位符替换
+    FE->>FE: M14-5 按 paramType 从 Cookie/工作台上下文取值
+    FE->>FE: 按 paramKey 拼接 URL 或组件 props
     FE->>FE: M15 执行 5 种打开方式之一
     FE->>SVC: POST /copilot/feedback (ACCEPTED)
-    SVC->>SVC: 持久化反馈日志
-    SVC->>SVC: 追加 executedSteps
-    SVC->>SVC: M16 反馈日志埋点
+    SVC->>SVC: Best-effort 记录 feedback_log(is_effective=N)
+    SVC-->>FE: RECORDED
+    SVC->>SVC: 异步校验 trigger_log 并 CAS 消费指令
+    SVC->>SVC: 异步追加 executedSteps / 静默列表
+    SVC->>SVC: 异步标记 feedback_log(is_effective=Y)
 
     Note over OP: 通话结束
     FE->>SVC: POST /copilot/session/unbind
@@ -3889,13 +3882,14 @@ cs-copilot-service/
 │   │   ├── match/
 │   │   │   └── IntentFunctionMatcher.java
 │   │   ├── param/
-│   │   │   ├── ParamResolver.java
+│   │   │   ├── ParamResolverService.java
 │   │   │   └── StandardParamType.java
 │   │   ├── directive/
 │   │   │   ├── DirectiveBuilder.java
 │   │   │   └── UrlBuilder.java
 │   │   └── feedback/
 │   │       ├── FeedbackService.java
+│   │       ├── FeedbackEffectProcessor.java
 │   │       └── MuteListManager.java
 │   │
 │   ├── asr/                         # ASR 接入层
@@ -4065,12 +4059,12 @@ M07 匹配引擎
   ✓ enabled=N 不返回
   ✓ DISABLED 风险等级不返回
 
-M08 参数解析
-  ✓ CUST_NO 从 session 取
-  ✓ CALL_ID 从 callMeta 取
-  ✓ EXP 字面值
-  ✓ **COOKIE_PLACEHOLDER 输出 ${COOKIE.xxx} 占位符**
-  ✓ 未知 paramType 跳过
+M08 参数配置透传
+  ✓ 后端不读取客户参数值
+  ✓ 校验 paramType 属于 StandardParamType
+  ✓ 校验 paramKey 必填
+  ✓ COOKIE_PLACEHOLDER 做 Cookie 白名单与域名绑定校验
+  ✓ 将 param_config_json 透传为 action.paramConfigs
 
 M09 指令构建
   ✓ URL 拼接含 query
@@ -4115,8 +4109,8 @@ M09 指令构建
 | M05 意图树加载器 + 热加载 | 1.5 | + Admin 接口（P1-7）|
 | M06 AI Feign Client + 熔断 + 过滤 + AI 计数 | 4 | + 熔断（P1-5），+ 计数（P1-4）|
 | M07 意图-功能匹配引擎 + 灰度白名单 + 异常默认 false | 4 | + 灰度（P1-9），+ 异常处理（P1-19）|
-| M08 参数解析器 + Cookie 受控 | 3 | + Cookie 白名单（P0-4）|
-| M09 跳转指令构建器 + URL 多重校验 | 3 | + URL 校验（P0-5），+ 修复 bug（P1-12）|
+| M08 参数配置透传 + Cookie 受控 | 3 | + Cookie 白名单（P0-4）|
+| M09 跳转指令构建器 + paramConfigs 透传 | 3 | + 基础目标构建，URL 安全由配置校验覆盖 |
 | M10 WebSocket 推送 | 2 | - |
 | M11 反馈接口 + 指令校验 + 幂等 + 静默列表 | 3.5 | + 指令校验（P0-6）|
 | M12 Copilot 配置发布 + 发布前基础校验 | 4.5 | + action/mapping/item 校验（P1-8）|
@@ -4261,7 +4255,7 @@ gantt
 - 配置实体规则到新增 `cs_copilot_entity_extractor` 表
 - 配置意图与实体的绑定关系
 
-**与本期关联**：通过 `EntityExtractor` 扩展点接入，不修改 `ParamResolver` 主流程。
+**与本期关联**：通过 `EntityExtractor` 扩展点接入；本期纯 action 参数保持后端透传、前端取值，实体抽取不进入主流程。
 
 **优先级**：P1
 

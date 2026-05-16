@@ -25,7 +25,4 @@ public class BuildContext {
 
     /** 候选动作完整配置 */
     private CopilotActionConfig action;
-
-    /** 参数解析上下文 */
-    private ParamContext paramContext;
 }
