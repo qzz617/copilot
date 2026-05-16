@@ -133,6 +133,7 @@
 | 服务端不校验业务权限 | 前端权限被绕过的潜在风险 | 前端基于工作台已有权限过滤 | F13 服务端权限校验 |
 | Cookie 占位符若误配高敏字段 | 登录态可能进入 URL query 被日志记录 | 白名单严格限制可用 Cookie；建议运营仅配置低敏业务参数 | F14 一次性 token 跳转 |
 | Pod 重启 timer 丢失 | 极少量推荐漏触发 | 滚动发布保证一个 Pod 可用；Kafka 重平衡有延迟容忍 | F15 Redis 持久化 timer |
+| 通话结束不立即删除 Redis 临时数据 | unbind 后 TTL 到期前数据仍占用 Redis 内存 | M02 写入 cleanup marker 让已排队防抖任务失效；其他通话级状态依赖 TTL 自动过期 | 若行内允许，后续评估 UNLINK/lazy delete 或独立清理机制 |
 | 配置发布基础校验非完整沙箱 | 发布后才能发现 AI 识别准确率问题 | 基础校验阻断明显错误（必填、URL、组合）；运营可手动测试 | F09 完整配置沙箱 |
 
 > **声明**：以上简化项已经业务方确认可接受。上线前需评估实际数据敏感度并取得合规审批。
@@ -371,7 +372,7 @@ graph LR
 | M03 对话历史管理 | **全量保存** 客户+坐席 | ASR 事件 | List<DialogMessage> |
 | M04 callId 绑定 | 通话级会话上下文 | CTI 弹屏事件 | CallSession |
 | M05 意图树加载器 | 启动时从配置文件加载 | Spring Resource | IntentTree 内存对象 |
-| M06 AI Feign Client | Feign 调用 + **调用前过滤** | history+intentTree | IntentResult |
+| M06 AI Feign Client | Feign 调用 + **调用前过滤** | history+intentTree | IntentRecognitionOutcome（含 IntentResult 或失败原因） |
 | M07 意图-功能匹配 | CopilotConfigSnapshot 反向索引查询 | intentCode | List<ItemCandidate> |
 | M08 参数解析器 | 上下文取值 + Cookie 占位符标记 | paramList + ctx | ResolvedParams |
 | M09 指令构建器 | URL 拼接（含占位符）+ actionType 派生 | candidate + params | DirectiveDTO |
@@ -405,8 +406,9 @@ flowchart TD
     D -.防抖到期.-> E[加载历史 + 意图树]
     E --> F[**过滤** 只取客户消息]
     F --> G[Feign 调 AI]
-    G --> H[IntentResult]
-    H --> I[CopilotConfigSnapshot 反向索引]
+    G --> H[IntentRecognitionOutcome]
+    H -.success.-> I[CopilotConfigSnapshot 反向索引]
+    H -.failure.-> X[记录 trigger_log FAIL]
     I --> J[List ItemCandidate]
     J --> K[过滤禁用 action + 静默列表]
     K --> L[取最高优先级]
@@ -670,10 +672,11 @@ stateDiagram-v2
 @Component
 public class SentenceMerger {
 
-    private final Map<String, ScheduledFuture<?>> debounceTimers = new ConcurrentHashMap<>();
-    private final Map<String, ScheduledFuture<?>> silenceTimers = new ConcurrentHashMap<>();
+    private static final String STATE_KEY_PREFIX = "copilot:{asr_merge}:state:";
+    private static final String DUE_QUEUE_KEY = "copilot:{asr_merge}:due";
+    private static final String CLEANED_ROUND_MARKER = "CLEANED";
 
-    @Autowired private ScheduledExecutorService scheduler;
+    @Autowired private StringRedisTemplate redisTemplate;
     @Autowired private IntentRecognitionTrigger trigger;
 
     public void handleSentence(AsrSentenceEvent event) {
@@ -681,18 +684,19 @@ public class SentenceMerger {
         SentenceContinuity continuity = detect(event.getContent());
         long debounceMs = mapDebounceMs(continuity);
 
-        cancelTimer(debounceTimers.remove(callId));
-        debounceTimers.put(callId, scheduler.schedule(
-            () -> trigger.fire(callId), debounceMs, TimeUnit.MILLISECONDS));
-
-        cancelTimer(silenceTimers.remove(callId));
-        silenceTimers.put(callId, scheduler.schedule(
-            () -> trigger.fire(callId), 2000, TimeUnit.MILLISECONDS));
+        String roundId = nextRoundId();
+        redisTemplate.opsForValue().set(
+            stateKey(callId), roundId, debounceMs + 10 * 60 * 1000L,
+            TimeUnit.MILLISECONDS);
+        redisTemplate.opsForZSet().add(DUE_QUEUE_KEY,
+            eventMember(callId, roundId, "DEBOUNCE"),
+            System.currentTimeMillis() + debounceMs);
     }
 
     public void cleanup(String callId) {
-        cancelTimer(debounceTimers.remove(callId));
-        cancelTimer(silenceTimers.remove(callId));
+        // 通话结束后写入标记，使已排队旧 roundId 的 claim 失败。
+        redisTemplate.opsForValue().set(
+            stateKey(callId), CLEANED_ROUND_MARKER, 10, TimeUnit.MINUTES);
     }
 }
 ```
@@ -803,7 +807,8 @@ public class DialogHistoryManager {
     }
 
     public void cleanup(String callId) {
-        redisTemplate.delete(key(callId));
+        // 行内 Redis 规范不做应用层显式 delete，依赖 TTL 自动过期。
+        log.debug("Cleanup invoked, relying on TTL expiration, callId={}", callId);
     }
 
     private DialogMessage toDialogMessage(AsrSentenceEvent event) {
@@ -1290,7 +1295,8 @@ public class ExecutedStepsManager {
     }
 
     public void cleanup(String callId) {
-        redisTemplate.delete("copilot:steps:" + callId);
+        // 行内 Redis 规范不做应用层显式 delete，依赖 TTL 自动过期。
+        log.debug("Cleanup invoked, relying on TTL expiration, callId={}", callId);
     }
 }
 ```
@@ -2040,6 +2046,8 @@ public class FeedbackService {
 
 ### 17.5 静默列表
 
+> 静默列表属于通话级临时状态，通话结束后不主动删除 Redis key，依赖 2 小时 TTL 自动过期。
+
 ```java
 @Component
 public class MuteListManager {
@@ -2163,14 +2171,16 @@ cs_copilot_feedback_log（反馈日志，DD-V1.2 字段扩展）
 
 ```
 # AI 相关
-AI_TIMEOUT                 AI 调用超时
-AI_FAILED                  AI 业务失败
 AI_CIRCUIT_BREAKER_OPEN    熔断打开
-AI_NETWORK_FAIL            AI 网络/超时失败
-AI_BUSINESS_FAIL           AI 响应业务失败
+AI_NETWORK_FAIL            AI 网络/超时失败（覆盖历史 AI_TIMEOUT 场景）
+AI_BUSINESS_FAIL           AI 响应业务失败（覆盖历史 AI_FAILED 场景）
 NO_CUSTOMER_HISTORY        无客户侧对话历史
 INTENT_EMPTY               AI 返回空意图
 INTENT_NOT_MAPPED          意图未配置映射
+
+# 已废弃（兼容历史数据，不再写入）
+AI_TIMEOUT                 [已废弃] 历史含义：AI 调用超时；现统一用 AI_NETWORK_FAIL
+AI_FAILED                  [已废弃] 历史含义：AI 业务失败；现统一用 AI_BUSINESS_FAIL
 
 # 配置相关
 RISK_DISABLED              风险等级禁用
@@ -3282,7 +3292,22 @@ POST /copilot/session/unbind
 { "callId": "CALL_202604240001" }
 ```
 
-调用时机：通话结束时由前端调用，触发清理对话历史、executedSteps、callSession、防抖 timer 等。
+调用时机：通话结束时由前端调用。
+
+受行内 Redis 使用规范约束，本接口不主动删除 Redis key。实际行为是触发通话结束钩子：
+
+- M02 SentenceMerger 写入 cleanup marker，使已排队但未触发的防抖任务 claim 失败，避免 unbind 后继续调用 AI
+- M03 对话历史、M04 callSession、M06 executedSteps、M11 静默列表不主动删除，依赖 TTL 自动过期
+
+TTL 口径：
+
+| 状态 | TTL / 失效策略 |
+|------|----------------|
+| 防抖状态 | unbind 写 cleanup marker，marker 10 分钟后自动过期 |
+| 对话历史 | 1 小时 TTL |
+| callSession | 30 分钟 TTL |
+| executedSteps | 1 小时 TTL |
+| 静默列表 | 2 小时 TTL |
 
 ---
 
@@ -3509,8 +3534,8 @@ sequenceDiagram
 
     Note over OP: 通话结束
     FE->>SVC: POST /copilot/session/unbind
-    SVC->>Redis: 清理对话历史/callSession/静默
-    SVC->>SVC: 清理内存防抖 timer
+    SVC->>Redis: M02 写 cleanup marker 失效已排队防抖任务
+    SVC->>SVC: 其他通话级状态依赖 TTL 自动过期
 ```
 
 ---

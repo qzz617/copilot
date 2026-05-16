@@ -43,7 +43,7 @@ public class SessionController {
     }
 
     /**
-     * 解绑并清理通话临时状态。
+     * 解绑并触发通话结束钩子。
      *
      * @param request 解绑请求
      * @return 处理结果

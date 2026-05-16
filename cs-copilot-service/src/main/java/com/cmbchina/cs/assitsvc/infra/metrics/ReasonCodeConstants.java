@@ -5,7 +5,11 @@ package com.cmbchina.cs.assitsvc.infra.metrics;
  */
 public final class ReasonCodeConstants {
 
+    /** @deprecated 统一使用 {@link #AI_NETWORK_FAIL}。 */
+    @Deprecated
     public static final String AI_TIMEOUT = "AI_TIMEOUT";
+    /** @deprecated 统一使用 {@link #AI_BUSINESS_FAIL}。 */
+    @Deprecated
     public static final String AI_FAILED = "AI_FAILED";
     public static final String AI_CIRCUIT_BREAKER_OPEN = "AI_CIRCUIT_BREAKER_OPEN";
     public static final String AI_NETWORK_FAIL = "AI_NETWORK_FAIL";

@@ -166,7 +166,7 @@ CREATE TABLE svccfg.cs_copilot_trigger_log (
     risk_level              varchar(16),
     directive_id            varchar(64),
     expire_at               timestamp,                  -- DD-V1.2 P0-6 指令过期时间
-    directive_status        varchar(16),                -- DD-V1.2 P0-6 PUSHED/EXPIRED/CONSUMED
+    directive_status        varchar(16),                -- DD-V1.2 P0-6 PUBLISHED/EXPIRED/CONSUMED/DELIVERED
 
     -- 业务结果
     result_status           varchar(32),                -- SUCCESS/FAIL/FILTERED
