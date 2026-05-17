@@ -11,7 +11,7 @@
 > 1. **M01 顺序修订（P0-7）**：先存历史再做触发判断，落实"全量保存"语义
 > 2. **callSession 必校验（P0-8）**：缺失时 fail closed，不再用空 operatorId 推荐
 > 3. **反馈接口指令校验（P0-6）**：directive_id 唯一约束 + 服务端校验 + 幂等控制
-> 4. **Cookie 受控能力（P0-4）**：增加 Cookie 名白名单 + Cookie-域名绑定白名单
+> 4. **业务参数透传**：纯 action 仅允许 CUST_NO / CUST_ID_NO / MOBPHN1 / ACCOUNT_NO，由前端按业务类型取值
 > 5. **URL 安全增强（P0-5）**：https 协议、生产禁 UAT、同名参数冲突策略
 > 6. **熔断保护（P1-5）**：AI Feign 增加熔断（不做限流/Bulkhead）
 > 7. **基础灰度白名单（P1-9）**：operatorId 白名单（不做完整灰度框架）
@@ -131,7 +131,7 @@
 | 对话历史含敏感原文 | Redis 中可能含身份证/手机号/卡号等 | Redis TTL 1 小时自动清理；不外传 | F05 数据脱敏框架 |
 | AI 调用未脱敏 | 客户原文传给行内大模型 | 调用行内大模型，不外传 | F05 数据脱敏框架 |
 | 服务端不校验业务权限 | 前端权限被绕过的潜在风险 | 前端基于工作台已有权限过滤 | F13 服务端权限校验 |
-| Cookie 占位符若误配高敏字段 | 登录态可能进入 URL query 被日志记录 | 白名单严格限制可用 Cookie；建议运营仅配置低敏业务参数 | F14 一次性 token 跳转 |
+| 前端业务参数取值规则不一致 | 不同功能打开时参数缺失或取值错误 | 后端只允许 4 个业务参数类型，前端统一维护 `paramType -> 取值来源` 映射 | F14 一次性 token 跳转 |
 | Pod 重启 timer 丢失 | 极少量推荐漏触发 | 滚动发布保证一个 Pod 可用；Kafka 重平衡有延迟容忍 | F15 Redis 持久化 timer |
 | 通话结束不立即删除 Redis 临时数据 | unbind 后 TTL 到期前数据仍占用 Redis 内存 | M02 写入 cleanup marker 让已排队防抖任务失效；其他通话级状态依赖 TTL 自动过期 | 若行内允许，后续评估 UNLINK/lazy delete 或独立清理机制 |
 | 配置发布基础校验非完整沙箱 | 发布后才能发现 AI 识别准确率问题 | 基础校验阻断明显错误（必填、URL、组合）；运营可手动测试 | F09 完整配置沙箱 |
@@ -150,7 +150,7 @@
 安全分层：
 
 ```
-后端：基础校验（callSession 存在、action 启用、关联菜单项可用、URL 白名单、Cookie 白名单）→ 不推不该推的推荐
+后端：基础校验（callSession 存在、action 启用、关联菜单项可用、URL 白名单、业务 paramType 白名单）→ 不推不该推的推荐
 前端：基于工作台权限二次过滤 → 不展示无权限的功能
 坐席：确认后才打开
 日志：全链路可追溯（trigger_log 含 result_status / reason_code）
@@ -188,13 +188,13 @@
 
 6. 服务端做基础校验，不做业务权限校验（DD-V1.2 调整）
    - 前端基于工作台已有权限体系判断业务权限（仍由前端控制）
-   - 后端做基础校验：callSession 存在、action 启用、关联菜单项可用、URL/Cookie 白名单
+   - 后端做基础校验：callSession 存在、action 启用、关联菜单项可用、URL 白名单、业务 paramType 白名单
    - 后端不做"该坐席能否访问此功能"的业务权限判断
    - 简化后端，降低耦合，但保留必要的安全底线
 
-7. 服务端不拼前端登录态参数（DD-V1.1）
-   - 服务端 URL 用占位符 ${COOKIE.xxx} 表示
-   - 前端拿到指令后从 cookie 取值替换
+7. 服务端不拼前端登录态参数
+   - 服务端只透传业务 `paramType` 和目标侧 `paramKey`
+   - 前端拿到指令后按业务参数类型从 Cookie / 工作台上下文取值
 ```
 
 ---
@@ -212,7 +212,7 @@
 | M05 | 意图树加载器 | 后端 | 1.5 | + 热加载接口（P1-7）|
 | M06 | AI Feign Client + 过滤 + 熔断 | 后端 | 4 | + 熔断（P1-5），+ AI 计数（P1-4）|
 | M07 | 意图-功能匹配引擎 | 后端 | 4 | + 灰度白名单（P1-9）|
-| M08 | 参数配置透传 | 后端 | 3 | Cookie 白名单（P0-4） |
+| M08 | 参数配置透传 | 后端 | 3 | 仅允许 4 个业务参数类型 |
 | M09 | 跳转指令构建器 | 后端 | 3 | + 基础目标构建 + paramConfigs 透传 |
 | M10 | WebSocket 推送 | 后端 | 2 | - |
 | M11 | 反馈接口 | 后端 | 3.5 | + 指令校验 + 幂等（P0-6）|
@@ -302,7 +302,7 @@ graph TB
     end
 
     subgraph Frontend["工作台前端"]
-        SDK[M14 前端 SDK<br/>权限过滤+Cookie 替换]
+        SDK[M14 前端 SDK<br/>权限过滤+参数取值]
         OPEN[M15 五种打开方式]
     end
 
@@ -1410,142 +1410,60 @@ if (!grayWhitelistFilter.isOperatorEnabled(operatorId)) {
 
 ---
 
-## 15. 参数配置透传（M08）— 含 Cookie 受控参数
+## 15. 参数配置透传（M08）— 业务参数类型
 
 ### 15.1 标准参数枚举
 
-保留存量 13 个 `param_type` 的配置语义，但本期纯 action 不在后端从 session/callMeta 取客户参数值；后端只校验配置并透传给前端，前端按 `paramType` 从 Cookie / 工作台上下文取值。不实现 ASR 实体抽取。
+本期纯 action 只允许配置前端工作台可取值的业务参数类型。后端不从 session/callMeta 取客户参数值，只校验配置并透传给前端，前端按 `paramType` 从 Cookie / 工作台上下文取值。不实现 ASR 实体抽取。
 
 ```java
 public enum StandardParamType {
 
-    // 客户信息（来自 session）
-    CUST_NO("客户号", SourceType.SESSION, "customer.customerId", false),
-    CUST_ID_NO("证件号", SourceType.SESSION, "customer.idNo", true),
-    CUST_ID_NO_NOTYPE("无证件号类型", SourceType.SESSION, "customer.noIdType", false),
-    PALM_LIFE_USER_ID("掌上生活用户ID", SourceType.SESSION, "customer.palmLifeUserId", false),
-
-    // 联系方式
-    MOBPHN1("预留手机号一", SourceType.SESSION, "customer.phoneNo", true),
-    MOBPHN1_NO_ZERO("预留手机号一(去0)", SourceType.SESSION, "customer.phoneNoNoZero", true),
-
-    // 账户
-    ACCOUNT_NO("账户号", SourceType.SESSION, "accounts[0].accountNo", false),
-
-    // 地址
-    ADDR_TEXT("地址", SourceType.SESSION, "customer.address", true),
-    ENCODE_ADDR_TEXT("地址(编码)", SourceType.SESSION, "customer.addressEncode", true),
-
-    // 通话
-    CALL_ID("通话ID", SourceType.CALL_META, "callId", false),
-    IN_LINE_N0("进线号码", SourceType.CALL_META, "calledNumber", true),
-
-    // 业务控制（字面值）
-    SUPP_CARD_INTERCEPT("是否拦截纯附属卡人", SourceType.LITERAL, null, false),
-
-    // 自定义
-    EXP("自定义参数", SourceType.LITERAL, null, false),
-
-    // === DD-V1.1 新增：Cookie 占位符 ===
-    COOKIE_PLACEHOLDER("Cookie 占位符", SourceType.COOKIE, null, false);
+    CUST_NO("客户号", false),
+    CUST_ID_NO("证件号", true),
+    MOBPHN1("预留手机号", true),
+    ACCOUNT_NO("账户号", false);
 
     private final String displayName;
-    private final SourceType sourceType;
-    private final String defaultSourceKey;
     private final boolean sensitive;
-
-    public enum SourceType {
-        SESSION,        // 来自 SessionContext
-        CALL_META,      // 来自 CallMeta
-        LITERAL,        // 字面值（来自 param_value）
-        COOKIE          // DD-V1.1 新增：Cookie 占位符，前端替换
-    }
 }
 ```
 
-### 15.2 Cookie 受控占位符方案（DD-V1.2 调整 P0-4）
+### 15.2 业务参数透传方案
 
-> **DD-V1.2 关键修订**：增加 Cookie 名白名单 + Cookie-域名绑定白名单，防止运营误配导致敏感 Cookie 泄露。
+> 当前实现不允许后端配置具体 Cookie 名，也不允许旧版占位符参数类型。后端只配置业务语义参数类型，前端负责把业务参数类型映射到 Cookie / 工作台上下文中的实际值。
 
 #### 配置示例
 
 ```
 某个纯 action 的 `cs_copilot_action.param_config_json` 中：
-  param_type=COOKIE_PLACEHOLDER
-  param_key=token        （URL 参数名）
-  param_value=token      （cookie 字段名）
+  param_type=CUST_NO
+  param_key=custNo       （目标系统需要的 URL 参数名或组件 props 名）
+  param_value=NULL       （本期不使用）
 
 服务端输出：
-  action.paramConfigs = 原始参数配置数组（paramType/paramKey/paramValue）
+  action.paramConfigs = 原始参数配置数组（paramType/paramKey）
 
 服务端不拼接客户参数值：
   action.url = https://target/page
 
 前端拿到指令后：
-  ① 校验 token 在 Cookie 白名单内 → 通过
-  ② 校验 target/page 域名允许使用 token → 通过
-  ③ 根据 paramType 从 Cookie / 工作台上下文读取实际值
-  ④ 按 paramKey 拼接最终 URL：
-     https://target/page?custNo=C123&token=eyJhbGciOiJ...
-```
-
-#### Cookie 白名单配置
-
-```yaml
-copilot:
-  cookie-placeholder:
-    enabled: true
-    # 允许使用的 Cookie 名白名单（运营配置只能使用这些）
-    allowed-cookies:
-      - workbenchSession
-      - businessParam1
-      - businessParam2
-    # Cookie 与目标域名绑定（细粒度限制）
-    domain-bindings:
-      frdctrfront.paas.cmbchina.cn:
-        - workbenchSession
-      mccusweb.paas.cmbchina.cn:
-        - businessParam1
-        - businessParam2
-    # 必填 Cookie（缺失时阻断打开，不保留占位符）
-    required-cookies:
-      - workbenchSession
+  ① 根据 paramType=CUST_NO 从 Cookie / 工作台上下文读取实际值
+  ② 按 paramKey 拼接最终 URL 或组件 props：
+     https://target/page?custNo=C123
 ```
 
 #### 服务端校验
 
-> 配置发布前（M12 一键发布时）和运行时加载配置时校验 Cookie 配置合法性；运行时指令构建不读取 Cookie 值：
+> 配置发布前（M12 一键发布时）和运行时加载配置时校验参数配置合法性；运行时指令构建不读取客户参数值：
 
 ```java
-@Component
-public class CookiePlaceholderValidator {
-    
-    @Value("#{'${copilot.cookie-placeholder.allowed-cookies}'.split(',')}")
-    private Set<String> allowedCookies;
-    
-    public ValidationResult validate(ItemParam param, String targetUrl) {
-        if (!"COOKIE_PLACEHOLDER".equals(param.getParamType())) {
-            return ValidationResult.SKIP;
+private void validateParamConfigs(CopilotActionConfig action, List<String> errors) {
+    for (ItemParam param : action.getParams()) {
+        StandardParamType.valueOf(param.getParamType()); // 仅允许 CUST_NO/CUST_ID_NO/MOBPHN1/ACCOUNT_NO
+        if (!StringUtils.hasText(param.getParamKey())) {
+            errors.add("paramKey missing");
         }
-        
-        String cookieName = param.getParamValue();
-        
-        // ① Cookie 名白名单
-        if (!allowedCookies.contains(cookieName)) {
-            return ValidationResult.fail(
-                "Cookie '" + cookieName + "' not in whitelist");
-        }
-        
-        // ② Cookie-域名绑定
-        String targetDomain = extractDomain(targetUrl);
-        Set<String> allowedForDomain = domainBindings.get(targetDomain);
-        if (allowedForDomain == null || !allowedForDomain.contains(cookieName)) {
-            return ValidationResult.fail(
-                "Cookie '" + cookieName + "' not allowed for domain '" 
-                + targetDomain + "'");
-        }
-        
-        return ValidationResult.OK;
     }
 }
 ```
@@ -1553,33 +1471,23 @@ public class CookiePlaceholderValidator {
 #### 安全说明
 
 ```
-✗ 不允许进入 URL query 的 Cookie 类型：
-  - 认证 token（如 SSO token, JWT）
-  - 含 session 的高敏字段
-  - 长期有效的凭证
+✗ 不允许后端配置：
+  - 具体 Cookie 名
+  - 认证 token / SSO token / JWT
+  - 任意自定义参数表达式
 
-✓ 允许进入的 Cookie 类型：
-  - 短期工作台会话标识（仅当目标系统也是行内同体系）
-  - 业务参数类（如客户标签、当前选中的业务类型）
-
-⚠️ 长期方向（F14）：改造为后端一次性 token + 目标系统反查
-  - URL 不带敏感字段，只带 jumpToken
-  - jumpToken 5 分钟有效，用后即失效
-```
-
-#### Cookie 名格式（DD-V1.2 调整 P2-5）
-
-```
-原 DD-V1.1 正则：\w+（仅字母数字下划线）
-DD-V1.2 调整：[A-Za-z0-9_.-]+（兼容含 .- 的 cookie 名）
-配合白名单使用，正则放宽不影响安全。
+✓ 允许后端配置：
+  - CUST_NO
+  - CUST_ID_NO
+  - MOBPHN1
+  - ACCOUNT_NO
 ```
 
 #### 数据流
 
 ```mermaid
 flowchart LR
-    A[配置: param_type=COOKIE_PLACEHOLDER<br/>param_key=token<br/>param_value=token] --> B[M12/运行时配置校验]
+    A[配置: param_type=CUST_NO<br/>param_key=custNo] --> B[M12/运行时配置校验]
     B --> C[M09 指令构建]
     C --> D[action.paramConfigs 透传]
     D --> E[WebSocket 推送给前端]
@@ -1806,10 +1714,7 @@ public class UrlBuilder {
         for (Map.Entry<String, String> e : finalParams.entrySet()) {
             if (!first) sb.append("&");
             String value = e.getValue();
-            // ${COOKIE.xxx} 占位符不编码（前端替换后再编码）
-            if (!value.startsWith("${COOKIE.")) {
-                value = URLEncoder.encode(value, StandardCharsets.UTF_8);
-            }
+            value = URLEncoder.encode(value, StandardCharsets.UTF_8);
             sb.append(e.getKey()).append("=").append(value);
             first = false;
         }
@@ -2156,7 +2061,7 @@ AI_FAILED                  [已废弃] 历史含义：AI 业务失败；现统�
 # 配置相关
 RISK_DISABLED              风险等级禁用
 URL_NOT_ALLOWED            URL 白名单失败
-COOKIE_NOT_ALLOWED         Cookie 白名单失败
+PARAM_TYPE_NOT_ALLOWED     参数类型不在业务白名单中
 PARAM_MISSING              必填参数缺失
 
 # 会话相关
@@ -2208,7 +2113,7 @@ graph TB
     PERM[M14-4 权限过滤]
     UI[M14-2 浮窗 UI]
     CARD[M14-3 推荐卡片]
-    COOKIE[M14-5 按 paramType 前端取值]
+    PARAM[M14-5 按 paramType 前端取值]
     FEEDBACK[M14-6 反馈上报]
     OPEN[M15 五种打开方式]
 
@@ -2216,8 +2121,8 @@ graph TB
     PERM -.有权限.-> UI
     PERM -.无权限.-> SKIP[静默丢弃]
     UI --> CARD
-    CARD -.坐席点击.-> COOKIE
-    COOKIE --> OPEN
+    CARD -.坐席点击.-> PARAM
+    PARAM --> OPEN
     CARD -.采纳/忽略.-> FEEDBACK
 ```
 
@@ -2312,66 +2217,22 @@ const handleDirective = (directive) => {
 
 ### 19.4 参数取值与拼接（M14-5）
 
-> DD-V1.2 关键设计：纯 action 的 `action.paramConfigs` 由后端透传，前端按 `paramType` 从 Cookie / 工作台上下文读取实际值，并按 `paramKey` 拼接到 URL 或组件 props。
+> 关键设计：纯 action 的 `action.paramConfigs` 由后端透传，前端按业务 `paramType` 从 Cookie / 工作台上下文读取实际值，并按 `paramKey` 拼接到 URL 或组件 props。后端不配置具体 Cookie 名，前端维护 `paramType -> 取值来源` 的映射。
 
 ```javascript
-const COOKIE_PATTERN = /\$\{COOKIE\.(\w+)\}/g;
-
-const COOKIE_NAME_PATTERN = /^[A-Za-z0-9_.-]+$/;  // P2-5 兼容含 .- 的 cookie 名
-
-// DD-V1.2 P0-4：Cookie 白名单 + 域名绑定校验
-const validateCookieAccess = (cookieName, targetUrl) => {
-  if (!ALLOWED_COOKIES.includes(cookieName)) {
-    return { ok: false, reason: 'COOKIE_NOT_IN_WHITELIST' };
-  }
-  const targetDomain = new URL(targetUrl).hostname;
-  const allowedForDomain = DOMAIN_BINDINGS[targetDomain] || [];
-  if (!allowedForDomain.includes(cookieName)) {
-    return { ok: false, reason: 'COOKIE_NOT_ALLOWED_FOR_DOMAIN' };
-  }
-  return { ok: true };
+const PARAM_VALUE_RESOLVERS = {
+  CUST_NO: () => workbenchContext.getValue('CUST_NO'),
+  CUST_ID_NO: () => workbenchContext.getValue('CUST_ID_NO'),
+  MOBPHN1: () => workbenchContext.getValue('MOBPHN1'),
+  ACCOUNT_NO: () => workbenchContext.getValue('ACCOUNT_NO')
 };
 
-// URL 场景的替换（DD-V1.2 P1-13：必填 Cookie 缺失阻断）
-const replaceCookiePlaceholdersInUrl = (url) => {
-  let blocked = false;
-  let blockReason = '';
-  const finalUrl = url.replace(COOKIE_PATTERN, (match, cookieName) => {
-    const access = validateCookieAccess(cookieName, url);
-    if (!access.ok) {
-      blocked = true;
-      blockReason = access.reason;
-      return match;
-    }
-    const value = getCookie(cookieName);
-    if (value === null) {
-      // P1-13：必填 Cookie 缺失则阻断；可选 Cookie 跳过
-      if (REQUIRED_COOKIES.includes(cookieName)) {
-        blocked = true;
-        blockReason = 'REQUIRED_COOKIE_MISSING';
-        return match;
-      } else {
-        return '';  // 可选 Cookie 缺失：替换为空（不保留占位符）
-      }
-    }
-    return encodeURIComponent(value);
-  });
-  return { url: finalUrl, blocked, reason: blockReason };
-};
-
-// DD-V1.2 调整：后端不解析客户参数，只透传 action.paramConfigs。
-// 前端按 paramType 从 Cookie / 工作台上下文取值，再按 paramKey 拼 URL 或组件 props。
 const resolveValueByParamType = (param) => {
-  if (param.paramType === 'COOKIE_PLACEHOLDER') {
-    return getCookie(param.paramValue);
+  const resolver = PARAM_VALUE_RESOLVERS[param.paramType];
+  if (!resolver) {
+    return null;
   }
-  if (param.paramType === 'CUST_ID_NO' || param.paramType === 'MOBPHN1' || param.paramType === 'ACCOUNT_NO') {
-    return workbenchContext.getValue(param.paramType);
-  }
-  if (param.paramType === 'EXP') {
-    return param.paramValue;
-  }
-  return workbenchContext.getValue(param.paramType);
+  return resolver();
 };
 
 const buildParamsFromConfigs = (paramConfigs = []) => {
@@ -2401,25 +2262,14 @@ const openWithReplacement = (directive) => {
       || directive.action.actionType === 'OPEN_NEW_WINDOW') {
     // URL 场景
     const targetUrl = appendParamsToUrl(directive.action.url, params);
-    const result = replaceCookiePlaceholdersInUrl(targetUrl);
-    if (result.blocked) {
-      showError(`无法打开：${result.reason}`);
-      reportOpenBlocked(directive, result.reason);
-      return;
-    }
-    executeOpen(directive.action.actionType, result.url, null);
+    executeOpen(directive.action.actionType, targetUrl, null);
   } else if (directive.action.actionType.startsWith('OPEN_COMPONENT_')) {
     // 组件场景
     executeOpen(directive.action.actionType, null, params);
   } else {
     // 路由场景
     const targetUrl = appendParamsToUrl(directive.action.url, params);
-    const result = replaceCookiePlaceholdersInUrl(targetUrl);
-    if (result.blocked) {
-      showError(`无法打开：${result.reason}`);
-      return;
-    }
-    executeOpen(directive.action.actionType, result.url, null);
+    executeOpen(directive.action.actionType, targetUrl, null);
   }
 };
 ```
@@ -2505,7 +2355,7 @@ window.addEventListener('callEnd', () => {
 | 表名 | 说明 |
 |------|------|
 | `cs_menu_item` | 核心菜单项（item_id 主键） |
-| `cs_menu_item_param` | 参数列表（含 13 个标准 param_type） |
+| `cs_menu_item_param` | 存量菜单参数列表；Copilot 纯 action 仅允许 4 个业务 `paramType` |
 | `cs_menu_item_info` | 悬浮信息（owner / tech 联系人） |
 | `cs_menu_group` | 分组 |
 | `cs_menu_module` | 模块 |
@@ -3019,7 +2869,7 @@ flowchart TD
 | 菜单项存在性 | 不校验 | `cs_menu_item.item_id` 必须存在 |
 | 菜单项启用状态 | 不校验 | `cs_menu_item.enabled` 必须为 `Y` |
 | 快照一致性 | 不校验 | `item_snapshot_json` 不为空时比较 itemName/url/sysFlag/pageId/pageTitle/enabled |
-| 参数来源 | 校验 `param_config_json` 格式、`paramType` 枚举和 Cookie 白名单；不校验实际客户值 | 不校验，沿用现有快捷导航打开链路 |
+| 参数来源 | 校验 `param_config_json` 格式、`paramType` 仅允许 CUST_NO / CUST_ID_NO / MOBPHN1 / ACCOUNT_NO；不校验实际客户值 | 不校验，沿用现有快捷导航打开链路 |
 
 校验失败策略：
 
@@ -3254,14 +3104,14 @@ POST /copilot/session/bind
 | customerId | string | 否 | 客户号（来电弹屏获取） |
 | customerType | string | 否 | 客户类型 |
 | idNo | string | 否 | 证件号，对应 `CUST_ID_NO` |
-| noIdType | string | 否 | 无证件类型标识，对应 `CUST_ID_NO_NOTYPE` |
+| noIdType | string | 否 | 无证件类型标识；本期纯 action 不配置该参数 |
 | palmLifeUserId | string | 否 | 掌上生活用户 ID |
 | phoneNo | string | 否 | 预留手机号一，对应 `MOBPHN1` |
-| phoneNoNoZero | string | 否 | 预留手机号一去 0，对应 `MOBPHN1_NO_ZERO` |
+| phoneNoNoZero | string | 否 | 预留手机号一去 0；本期纯 action 不配置该参数 |
 | accountNo | string | 否 | 主账户号，对应 `ACCOUNT_NO` |
-| address | string | 否 | 地址，对应 `ADDR_TEXT` |
-| addressEncode | string | 否 | 编码地址，对应 `ENCODE_ADDR_TEXT` |
-| calledNumber | string | 否 | 进线号码，对应 `IN_LINE_N0` |
+| address | string | 否 | 地址；本期纯 action 不配置该参数 |
+| addressEncode | string | 否 | 编码地址；本期纯 action 不配置该参数 |
+| calledNumber | string | 否 | 进线号码；本期纯 action 不配置该参数 |
 | sessionStartTime | string | 否 | 通话开始时间 |
 
 响应：
@@ -3882,7 +3732,6 @@ cs-copilot-service/
 │   │   ├── match/
 │   │   │   └── IntentFunctionMatcher.java
 │   │   ├── param/
-│   │   │   ├── ParamResolverService.java
 │   │   │   └── StandardParamType.java
 │   │   ├── directive/
 │   │   │   ├── DirectiveBuilder.java
@@ -4061,16 +3910,15 @@ M07 匹配引擎
 
 M08 参数配置透传
   ✓ 后端不读取客户参数值
-  ✓ 校验 paramType 属于 StandardParamType
+  ✓ 校验 paramType 属于 CUST_NO / CUST_ID_NO / MOBPHN1 / ACCOUNT_NO
   ✓ 校验 paramKey 必填
-  ✓ COOKIE_PLACEHOLDER 做 Cookie 白名单与域名绑定校验
   ✓ 将 param_config_json 透传为 action.paramConfigs
 
 M09 指令构建
   ✓ URL 拼接含 query
   ✓ URL 拼接 base 已含 ?
   ✓ 中文参数 URL 编码
-  ✓ **${COOKIE.xxx} 占位符不做 URL 编码**
+  ✓ 前端传入参数统一 URL 编码
   ✓ actionType 正确派生
   ✓ 域名白名单拦截
 ```
@@ -4088,7 +3936,7 @@ M09 指令构建
   ✓ AI 失败 → 静默
   ✓ 配置刷新 → 内存切换
   ✓ 通话结束清理
-  ✓ Cookie 占位符在 URL 中正确保留
+  ✓ 业务 paramType 正确透传给前端
 ```
 
 ---
@@ -4109,7 +3957,7 @@ M09 指令构建
 | M05 意图树加载器 + 热加载 | 1.5 | + Admin 接口（P1-7）|
 | M06 AI Feign Client + 熔断 + 过滤 + AI 计数 | 4 | + 熔断（P1-5），+ 计数（P1-4）|
 | M07 意图-功能匹配引擎 + 灰度白名单 + 异常默认 false | 4 | + 灰度（P1-9），+ 异常处理（P1-19）|
-| M08 参数配置透传 + Cookie 受控 | 3 | + Cookie 白名单（P0-4）|
+| M08 参数配置透传 | 3 | 仅允许 4 个业务参数类型 |
 | M09 跳转指令构建器 + paramConfigs 透传 | 3 | + 基础目标构建，URL 安全由配置校验覆盖 |
 | M10 WebSocket 推送 | 2 | - |
 | M11 反馈接口 + 指令校验 + 幂等 + 静默列表 | 3.5 | + 指令校验（P0-6）|
@@ -4131,13 +3979,13 @@ M09 指令构建
 | 评审项 | 增加工时 |
 |-------|---------|
 | P0-6 反馈指令校验 + 幂等 | +1.5 |
-| P0-4 Cookie 受控（前后端） | +1.5 |
+| P0-4 业务参数白名单（前后端） | +1.5 |
 | P0-5 URL 多重校验 | +1 |
 | P1-5 熔断 | +1 |
 | P1-7 意图树热加载 | +0.5 |
 | P1-8 Copilot 配置发布前校验 | +1.5 |
 | P1-9 灰度白名单 | +0 |
-| P1-13 Cookie required/optional | +1 |
+| P1-13 前端参数缺失处理 | +1 |
 | P1-16 trigger_log 字段扩展 | +0.5 |
 | P1-17 多 Pod 一致性 | +0.5 |
 | P1-20 前端权限 fail closed | +0.5 |
@@ -4178,7 +4026,7 @@ gantt
     指令构建+推送         :a4, after a3, 5d
     section 前端
     Copilot SDK 框架     :b1, after a2, 5d
-    浮窗+权限+Cookie     :b2, after b1, 5d
+    浮窗+权限+参数取值   :b2, after b1, 5d
     五种打开方式         :b3, after b2, 5d
     section 集成
     Top 30 配置          :c1, after a4, 5d
@@ -4191,7 +4039,7 @@ gantt
 |----|--------|--------------|
 | Week 1 | 基础框架 + 数据模型上线（含扩展字段） | - |
 | Week 2 | ASR 链路打通（M01-M04，**P0-7 顺序+P0-8 fail closed**） | 含安全调整 |
-| Week 3 | AI 接入 + 匹配引擎（M05-M08，**P1-5 熔断+P0-4 Cookie 白名单**） | 含安全增强 |
+| Week 3 | AI 接入 + 匹配引擎（M05-M08，**P1-5 熔断+业务参数白名单**） | 含安全增强 |
 | Week 4 | 推送 + 前端 SDK 端到端 Demo（**P0-5 URL 校验+P0-6 反馈校验+P1-20 fail closed**） | 含安全增强 |
 | Week 5 | 配置后台 + Copilot 配置发布（M12 + M13，**P1-8 发布前校验**） | + 校验 |
 | Week 6 | Top 30 配置 + 联调（**含 P1-9 灰度白名单+P1-17 多 Pod 一致性**） | 灰度准备 |
@@ -4319,8 +4167,7 @@ F03/F04/F06/F07/F08/F09/F11/F12 详细规划与 DD-V1.0 一致，扩展接入路
 | CopilotConfigSnapshot | Copilot Service 从独立配置表构建的本地不可变配置快照 |
 | 反向索引 | CopilotConfigSnapshot 中的 `intentToActions` / `actionById` 等加速查询结构 |
 | 扩展点 | 接口形式预留的扩展位置，本期空实现 |
-| StandardParamType | 14 个标准参数枚举（DD-V1.1 新增 COOKIE_PLACEHOLDER） |
-| Cookie 占位符 | URL 中的 `${COOKIE.xxx}`，由前端从 cookie 读取替换 |
+| StandardParamType | 4 个前端工作台可取值的业务参数枚举：CUST_NO / CUST_ID_NO / MOBPHN1 / ACCOUNT_NO |
 | 全量保存 | M03 保存客户+坐席消息，过滤在 M06 |
 
 ---
@@ -4343,7 +4190,7 @@ F03/F04/F06/F07/F08/F09/F11/F12 详细规划与 DD-V1.0 一致，扩展接入路
 | 意图树 | 数据库 + 一键发布 | Spring 配置文件 |
 | **服务端权限校验**（DD-V1.1） | IAM 接口校验 | **删除，前端控制；F13 待实现** |
 | **外部接口客户端**（DD-V1.1） | RestTemplate | **Spring Cloud OpenFeign** |
-| **URL 拼接**（DD-V1.1） | 服务端拼完整 URL | **服务端用占位符 + 前端补 Cookie** |
+| **URL 拼接**（DD-V1.1） | 服务端拼完整 URL | **服务端透传 paramConfigs + 前端取业务参数** |
 | **会话保存与过滤**（DD-V1.1） | 一起处理 | **保存全量 + 调 AI 时过滤** |
 | **业务监控**（DD-V1.1） | 完整看板 | **仅落库，看板后续做** |
 | 数据模型 | 10+ 张表 | 4 张新增表 |
@@ -4357,7 +4204,7 @@ F03/F04/F06/F07/F08/F09/F11/F12 详细规划与 DD-V1.0 一致，扩展接入路
 | AI 接口客户端 | RestTemplate | Feign Client |
 | 对话历史保存 | 客户+坐席 | 客户+坐席（明确"全量保存"语义） |
 | AI 调用前过滤 | 未明确 | M06 调用前过滤只传客户 |
-| Cookie 占位符 | 无 | ${COOKIE.xxx} 占位符 + 前端替换 |
+| 参数取值 | 无 | 后端透传业务 paramType，前端取值并拼接 |
 | 业务监控 | 简略提及 | 结构化埋点字段详化 |
 | 数据库 DDL | 简略 | 完整 DDL + 字段说明 |
 | 接口设计 | 简略 | 完整 JSON 示例 + 字段表 + 错误码 |
@@ -4370,7 +4217,7 @@ F03/F04/F06/F07/F08/F09/F11/F12 详细规划与 DD-V1.0 一致，扩展接入路
 | M01 顺序 | 触发过滤前置 | **先存历史再触发判断（P0-7）** |
 | callSession 缺失处理 | 用空 operatorId 推 | **fail closed 不推荐（P0-8）** |
 | 反馈接口校验 | 仅幂等说明 | **directive_id UNIQUE + 服务端校验 + is_effective（P0-6）** |
-| Cookie 占位符 | 名格式校验 | **白名单 + 域名绑定 + required/optional（P0-4 + P1-13）** |
+| 参数取值 | 旧版允许后端配置具体 Cookie 参数 | **仅允许 4 个业务参数类型，前端统一取值** |
 | URL 校验 | 仅域名白名单 | **协议+域名+生产禁 UAT+同名冲突（P0-5）** |
 | AI 接口保护 | 仅超时 | **+ Resilience4j 熔断（P1-5）+ 单通话计数（P1-4）** |
 | 灰度 | 不做 | **最简 operatorId 白名单（P1-9）** |
@@ -4414,12 +4261,12 @@ F03/F04/F06/F07/F08/F09/F11/F12 详细规划与 DD-V1.0 一致，扩展接入路
 | P0-1 | 服务端权限校验完全删除风险高 | ⚠️ **部分采纳**：action 启用校验 + 关联 menuItem 校验 + callSession 必校验；权限快照不采纳 | M07 + 11.5 |
 | P0-2 | 对话历史不脱敏 | ❌ **不采纳**：用户明确决策；F05 待实现 | 2.3 已知风险声明 |
 | P0-3 | AI 调用未脱敏 | ❌ **不采纳**：同 P0-2 | 2.3 已知风险声明 |
-| P0-4 | Cookie 占位符泄露风险 | ⚠️ **部分采纳**：白名单 + 域名绑定；同源校验已通过 URL 白名单兜底 | 15.2 Cookie 受控 |
+| P0-4 | Cookie / token 泄露风险 | ✅ **完全规避**：后端不再允许配置具体 Cookie 名，仅允许业务 paramType | 15.2 |
 | P0-5 | URL 安全校验过简 | ⚠️ **部分采纳**：https + UAT 拦截 + 同名策略；路径/key 白名单不做（过度设计）| 16.4 URL 多重校验 |
 | P0-6 | 反馈接口缺指令校验 | ✅ **完全采纳** | 17 章 + 21.4/21.5 DDL |
 | P0-7 | M01 顺序冲突全量保存 | ✅ **完全采纳** | 8.2 + 8.4 |
 | P0-8 | callSession 缺失继续推荐不安全 | ✅ **完全采纳** | 11.5 fail closed |
-| P0-9 | URL token 长期保存风险 | ⚠️ **部分采纳**：白名单限制；一次性 token F14 待实现 | 15.2 |
+| P0-9 | URL token 长期保存风险 | ✅ **完全规避**：后端不配置 token 或具体 Cookie 名；一次性 token F14 保留为长期扩展 | 15.2 |
 | P0-10 | 后端按 AI 意图生成推荐缺前置过滤 | ❌ **不采纳**：用户明确决策；性能开销在 5 TPS 量级可忽略 | 2.3 |
 
 ### C.3 P1 级采纳详情
@@ -4438,7 +4285,7 @@ F03/F04/F06/F07/F08/F09/F11/F12 详细规划与 DD-V1.0 一致，扩展接入路
 | P1-10 | mapping_priority 重复 | ✅ 完全采纳：删除扩展表字段 | 21.2 DDL |
 | P1-11 | 参数缺失 reason 缺失 | ✅ 合并采纳 → P1-16 | result_status / reason_code |
 | P1-12 | UrlBuilder 尾部分隔符 bug | ✅ 完全采纳 | 16.4 |
-| P1-13 | Cookie 缺失保留占位符 | ✅ 完全采纳：required/optional 区分 | 19.4 替换函数 |
+| P1-13 | 前端参数缺失处理不清 | ✅ 完全采纳：前端按业务 paramType 统一处理缺失 | 19.4 |
 | P1-14 | 反馈幂等未保证 | ✅ 合并采纳 → P0-6 + is_effective | 21.5 DDL |
 | P1-15 | trigger-feedback 关联不稳定 | ✅ 合并采纳 → P0-6 + UNIQUE 索引 | 21.4 |
 | P1-16 | 日志缺失败原因 | ✅ 完全采纳：result_status/reason_code 等 | 18.5 + 21.4 |
@@ -4455,7 +4302,7 @@ F03/F04/F06/F07/F08/F09/F11/F12 详细规划与 DD-V1.0 一致，扩展接入路
 | P2-2 | operator_id 长度 16 偏短 | ✅ 完全采纳：改为 32 | 21 章 DDL |
 | P2-3 | customer_id 敏感等级 | ⚠️ 部分采纳：文档标注；脱敏 F05 | 21.4 字段说明 |
 | P2-4 | Map.of 不能 null | ✅ 完全采纳 | M04 callSession |
-| P2-5 | Cookie 正则 \w+ 偏严 | ✅ 完全采纳：[A-Za-z0-9_.-]+ | 15.2 |
+| P2-5 | Cookie 名正则偏严 | 不再适用：后端不配置具体 Cookie 名 | 15.2 |
 | P2-6 | params 编码语义不一 | ✅ 完全采纳：URL/Component 分别处理 | 19.4 |
 | P2-7 | OPEN_URL location.href 风险 | ✅ 完全采纳：文档说明 | 19 + 配置后台校验 |
 | P2-8 | 健康检查 AI 实时打 | ✅ 完全采纳：使用最近一次状态 | 27 章 |
@@ -4519,7 +4366,7 @@ F03/F04/F06/F07/F08/F09/F11/F12 详细规划与 DD-V1.0 一致，扩展接入路
 | 对话历史含敏感原文 | P0-2 | F05 |
 | AI 调用未脱敏 | P0-3 | F05 |
 | 服务端不校验业务权限 | P0-1（部分）+ P0-10 | F13 |
-| Cookie 占位符若误配高敏字段 | P0-9（长期方案） | F14 |
+| 前端业务参数取值规则不一致 | P0-9（长期方案） | F14 |
 | Pod 重启 timer 丢失 | P1-3 | F15 |
 | 配置发布基础校验非完整沙箱 | （评审未明确，DD-V1.2 主动声明） | F09 |
 

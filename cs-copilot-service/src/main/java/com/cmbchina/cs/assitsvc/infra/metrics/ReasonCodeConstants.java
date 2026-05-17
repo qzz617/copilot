@@ -19,7 +19,7 @@ public final class ReasonCodeConstants {
     public static final String INTENT_NOT_MAPPED = "INTENT_NOT_MAPPED";
     public static final String RISK_DISABLED = "RISK_DISABLED";
     public static final String URL_NOT_ALLOWED = "URL_NOT_ALLOWED";
-    public static final String COOKIE_NOT_ALLOWED = "COOKIE_NOT_ALLOWED";
+    public static final String PARAM_TYPE_NOT_ALLOWED = "PARAM_TYPE_NOT_ALLOWED";
     public static final String PARAM_MISSING = "PARAM_MISSING";
     public static final String SESSION_BIND_MISSING = "SESSION_BIND_MISSING";
     public static final String GRAY_FILTERED = "GRAY_FILTERED";

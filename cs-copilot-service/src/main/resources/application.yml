@@ -122,22 +122,6 @@ copilot:
     # 同名参数冲突策略：OVERRIDE / PRESERVE / ERROR
     same-key-policy: OVERRIDE
 
-  # Cookie 占位符配置（DD-V1.2 P0-4）
-  cookie-placeholder:
-    enabled: true
-    # 允许使用的 Cookie 名白名单
-    allowed-cookies:
-      - workbenchSession
-    # Cookie 与目标域名绑定
-    domain-bindings:
-      frdctrfront.paas.cmbchina.cn:
-        - workbenchSession
-      frdctrfront.paasuat.cmbchina.cn:
-        - workbenchSession
-    # 必填 Cookie（缺失时阻断打开，不保留占位符）
-    required-cookies:
-      - workbenchSession
-
   # 单通话限制（DD-V1.2 P1-4）
   call-limits:
     max-ai-calls: 50

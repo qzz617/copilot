@@ -1,7 +1,6 @@
 package com.cmbchina.cs.assitsvc.config;
 
 import com.cmbchina.cs.assitsvc.core.directive.UrlSecurityProperties;
-import com.cmbchina.cs.assitsvc.core.param.CookiePlaceholderValidator;
 import com.cmbchina.cs.assitsvc.core.param.StandardParamType;
 import com.cmbchina.cs.assitsvc.domain.ActionReference;
 import com.cmbchina.cs.assitsvc.domain.CopilotActionConfig;
@@ -25,7 +24,6 @@ import java.util.Map;
 public class CopilotConfigValidationServiceImpl implements CopilotConfigValidationService {
 
     private final UrlSecurityProperties urlSecurityProperties;
-    private final CookiePlaceholderValidator cookiePlaceholderValidator;
 
     @Override
     public ConfigValidationResult validate(CopilotConfigSnapshot snapshot) {
@@ -110,7 +108,7 @@ public class CopilotConfigValidationServiceImpl implements CopilotConfigValidati
         } else if ("ROUTE".equalsIgnoreCase(action.getTargetKind()) && !StringUtils.hasText(targetUrl)) {
             errors.add("routePath missing, actionId=" + action.getActionId());
         }
-        validateParamConfigs(action, targetUrl, errors);
+        validateParamConfigs(action, errors);
     }
 
     private void validateActionCombination(String actionId, String targetKind, String openMode, List<String> errors) {
@@ -147,7 +145,7 @@ public class CopilotConfigValidationServiceImpl implements CopilotConfigValidati
         }
     }
 
-    private void validateParamConfigs(CopilotActionConfig action, String targetUrl, List<String> errors) {
+    private void validateParamConfigs(CopilotActionConfig action, List<String> errors) {
         if (action.getParams() == null) {
             return;
         }
@@ -165,17 +163,13 @@ public class CopilotConfigValidationServiceImpl implements CopilotConfigValidati
                 StandardParamType.valueOf(param.getParamType());
             } catch (IllegalArgumentException e) {
                 errors.add("unsupported paramType, actionId=" + action.getActionId()
-                        + ", paramType=" + param.getParamType());
+                        + ", paramType=" + param.getParamType()
+                        + ", allowed=CUST_NO,CUST_ID_NO,MOBPHN1,ACCOUNT_NO");
                 continue;
             }
             if (!StringUtils.hasText(param.getParamKey())) {
                 errors.add("paramKey missing, actionId=" + action.getActionId()
                         + ", paramType=" + param.getParamType());
-            }
-            if ("COOKIE_PLACEHOLDER".equals(param.getParamType())
-                    && !cookiePlaceholderValidator.validate(param, targetUrl)) {
-                errors.add("cookie placeholder not allowed, actionId=" + action.getActionId()
-                        + ", paramKey=" + param.getParamKey());
             }
         }
     }
