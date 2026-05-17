@@ -15,7 +15,7 @@ public class FeedbackEsProperties {
     /** 是否启用反馈结果写入 ES。 */
     private boolean enabled = true;
 
-    /** ES 基础地址，例如 http://localhost:9200。 */
+    /** ES 基础地址，多个节点可用逗号分隔，例如 http://localhost:9200,http://localhost:9201。 */
     private String baseUrl = "http://localhost:9200";
 
     /** 反馈结果索引名。 */

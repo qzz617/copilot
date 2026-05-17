@@ -1856,7 +1856,7 @@ MVP 阶段反馈接口定位为埋点采集，不做 `trigger_log` 反查、不�
 
 #### ES 写入保证
 
-反馈结果写 ES 使用 best-effort 策略，ES 写入失败只记录 `[M16]` 告警，不影响反馈接口返回。
+反馈结果写 ES 使用 Java High Level REST Client，采用 best-effort 策略，ES 写入失败只记录 `[M16]` 告警，不影响反馈接口返回。
 
 ### 17.5 静默列表
 
@@ -3539,7 +3539,7 @@ Redis 容量：
 
 #### 反馈日志埋点（M11 + M16）
 
-每次反馈写入 ES 索引 `cs-copilot-feedback-log`：
+每次反馈通过 Java High Level REST Client 写入 ES 索引 `cs-copilot-feedback-log`：
 
 ```
 所有反馈类型都写 ES：

@@ -166,6 +166,7 @@ copilot:
     # 调用/触发日志先通过应用日志输出；反馈结果写入 ES。
     feedback-es:
       enabled: ${COPILOT_FEEDBACK_ES_ENABLED:true}
+      # 多节点可用逗号分隔，例如 http://es-1:9200,http://es-2:9200
       base-url: ${COPILOT_FEEDBACK_ES_URL:http://localhost:9200}
       index-name: ${COPILOT_FEEDBACK_ES_INDEX:cs-copilot-feedback-log}
       username: ${COPILOT_FEEDBACK_ES_USERNAME:}
