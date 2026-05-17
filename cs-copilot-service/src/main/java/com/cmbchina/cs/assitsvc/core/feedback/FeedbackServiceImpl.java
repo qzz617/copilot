@@ -3,20 +3,17 @@ package com.cmbchina.cs.assitsvc.core.feedback;
 import com.cmbchina.cs.assitsvc.domain.FeedbackRequest;
 import com.cmbchina.cs.assitsvc.infra.metrics.MetricsService;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 /**
  * 反馈处理服务实现。
  */
-@Slf4j
 @Service
 @RequiredArgsConstructor
 public class FeedbackServiceImpl implements FeedbackService {
 
     private final MetricsService metricsService;
-    private final FeedbackEffectProcessor feedbackEffectProcessor;
 
     @Override
     public FeedbackResult handleFeedback(FeedbackRequest request) {
@@ -25,13 +22,7 @@ public class FeedbackServiceImpl implements FeedbackService {
             return validationResult;
         }
 
-        String feedbackLogId = metricsService.recordFeedback(request, null, false);
-        try {
-            feedbackEffectProcessor.applyAsync(request, feedbackLogId);
-        } catch (RuntimeException e) {
-            log.warn("[M11] Submit async feedback effect failed, directiveId={}",
-                    request.getDirectiveId(), e);
-        }
+        metricsService.recordFeedback(request, null, false);
         return FeedbackResult.success("RECORDED");
     }
 

@@ -1,5 +1,6 @@
 package com.cmbchina.cs.assitsvc.infra.metrics;
 
+import com.alibaba.fastjson2.JSON;
 import com.cmbchina.cs.assitsvc.domain.CallSession;
 import com.cmbchina.cs.assitsvc.domain.DirectiveDTO;
 import com.cmbchina.cs.assitsvc.domain.FeedbackRequest;
@@ -19,8 +20,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class MetricsService {
 
-    private final TriggerLogDao triggerLogDao;
-    private final FeedbackLogDao feedbackLogDao;
+    private final FeedbackEsClient feedbackEsClient;
 
     /**
      * 记录成功推送日志。
@@ -31,7 +31,7 @@ public class MetricsService {
             return;
         }
         try {
-            triggerLogDao.insert(TriggerLogRecord.builder()
+            TriggerLogRecord record = TriggerLogRecord.builder()
                     .logId(generateId())
                     .callId(directive.getCallId())
                     .operatorId(directive.getOperatorId())
@@ -49,7 +49,8 @@ public class MetricsService {
                     .resultStatus("SUCCESS")
                     .triggerTime(Instant.now())
                     .configVersion(directive.getConfigVersion())
-                    .build());
+                    .build();
+            log.info("[M16] Copilot trigger log: {}", JSON.toJSONString(record));
         } catch (Exception e) {
             log.warn("[M16] Record trigger success failed, directiveId={}", directive.getDirectiveId(), e);
         }
@@ -61,7 +62,7 @@ public class MetricsService {
     public void recordTriggerFailure(String callId, CallSession session, String intentCode, String intentName,
                                      String reasonCode, String filterStage, String configVersion) {
         try {
-            triggerLogDao.insert(TriggerLogRecord.builder()
+            TriggerLogRecord record = TriggerLogRecord.builder()
                     .logId(generateId())
                     .callId(callId)
                     .operatorId(session == null ? null : session.getOperatorId())
@@ -73,7 +74,8 @@ public class MetricsService {
                     .filterStage(filterStage)
                     .triggerTime(Instant.now())
                     .configVersion(configVersion)
-                    .build());
+                    .build();
+            log.info("[M16] Copilot trigger log: {}", JSON.toJSONString(record));
         } catch (Exception e) {
             log.warn("[M16] Record trigger failure failed, callId={}, reasonCode={}", callId, reasonCode, e);
         }
@@ -85,7 +87,7 @@ public class MetricsService {
     public String recordFeedback(FeedbackRequest request, TriggerLogRecord triggerLog, boolean effective) {
         String logId = generateId();
         try {
-            feedbackLogDao.insert(FeedbackLogRecord.builder()
+            FeedbackLogRecord record = FeedbackLogRecord.builder()
                     .logId(logId)
                     .directiveId(request.getDirectiveId())
                     .triggerLogId(triggerLog == null ? null : triggerLog.getLogId())
@@ -97,7 +99,8 @@ public class MetricsService {
                     .menuItemId(request.getMenuItemId())
                     .isEffective(effective ? "Y" : "N")
                     .feedbackTime(parseInstant(request.getFeedbackTime()))
-                    .build());
+                    .build();
+            feedbackEsClient.index(record);
             return logId;
         } catch (Exception e) {
             log.warn("[M16] Record feedback failed, directiveId={}", request.getDirectiveId(), e);

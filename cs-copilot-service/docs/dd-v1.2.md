@@ -97,7 +97,7 @@
 | 9 | 跳转指令构建与推送 | 构建基础 URL/route + `action.paramConfigs` + WebSocket 推送 |
 | 10 | 反馈采集 | 4 种反馈先记录返回；异步做指令校验、幂等生效和静默/已执行步骤更新（P0-6） |
 | 11 | 前端 SDK | 浮窗 + 推荐卡片 + 5 种打开方式 + 按 `paramType` 取值拼接 + **权限 API fail closed**（P1-20） |
-| 12 | 业务监控埋点 | 触发日志 + 反馈日志落库（**仅落库，不做看板**） |
+| 12 | 业务监控埋点 | MVP 阶段触发日志打应用日志、反馈结果写 ES（**不做看板**） |
 | 13 | **配置发布基础校验**（DD-V1.2 新增 P1-8） | 一键发布前校验必填字段、URL 白名单、组合合法性 |
 
 ### 2.2 本期不做（明确清单）
@@ -115,8 +115,8 @@
 | 灰度发布机制（完整） | 仅做最简坐席白名单 | F07 |
 | 跨环境配置同步 | 后续独立设计 | F08 |
 | 配置沙箱（含 AI 评估） | 仅做基础校验 | F09 |
-| 业务效果看板 | 仅落库 | F10 |
-| 配置质量看板 | 仅落库 | F11 |
+| 业务效果看板 | 仅采集日志/ES 数据 | F10 |
+| 配置质量看板 | 仅采集日志/ES 数据 | F11 |
 | 应用日志、接口监控基础设施 | 行内已有 | - |
 | 服务端权限校验 | 前端控制 | F13 |
 | URL 一次性 token 改造 | 涉及目标系统 | **F14（DD-V1.2 新增）** |
@@ -378,7 +378,7 @@ graph LR
 | M09 指令构建器 | 基础目标 URL/route + actionType 派生 + paramConfigs | candidate + action | DirectiveDTO |
 | M10 WebSocket 推送 | 推送指令到前端 | DirectiveDTO | 前端 push |
 | M11 反馈接口 | 反馈采集先记录返回；异步生效静默/已执行步骤 | FeedbackDTO | DB + Redis |
-| M16 业务监控埋点 | 触发/反馈日志落库 | 业务事件 | DB |
+| M16 业务监控埋点 | 触发日志输出应用日志，反馈结果写 ES | 业务事件 | Log / ES |
 
 ### 6.2 前端模块职责矩阵
 
@@ -1817,10 +1817,10 @@ public class CopilotPushService {
 
 | feedbackType | 含义 | 后端处理 |
 |--------------|------|---------|
-| ACCEPTED | 坐席点击打开 | 先记录反馈事件并返回；异步校验通过后追加 executedSteps |
-| IGNORED | 坐席忽略 | 先记录反馈事件并返回；异步校验通过后 120s 内不重复推荐相同 intentCode |
-| WRONG_INTENT | 意图识别错误 | 先记录反馈事件并返回；异步校验通过后本通话内静默该 intentCode |
-| WRONG_FUNCTION | 意图对，功能映射错 | 先记录反馈事件并返回；异步校验通过后本通话内静默该 actionId |
+| ACCEPTED | 坐席点击打开 | MVP 阶段写入 ES 后立即返回 |
+| IGNORED | 坐席忽略 | MVP 阶段写入 ES 后立即返回 |
+| WRONG_INTENT | 意图识别错误 | MVP 阶段写入 ES 后立即返回 |
+| WRONG_FUNCTION | 意图对，功能映射错 | MVP 阶段写入 ES 后立即返回 |
 
 ### 17.2 反馈接口
 
@@ -1831,94 +1831,32 @@ public class CopilotPushService {
 ```mermaid
 flowchart TD
     A[POST /copilot/feedback] --> B[校验参数]
-    B --> C[Best-effort 记录反馈事件<br/>cs_copilot_feedback_log is_effective=N]
+    B --> C[Best-effort 写入 ES<br/>cs-copilot-feedback-log]
     C --> D[立即返回 RECORDED]
-    C -.异步.-> E[反查 trigger_log 并校验上下文/过期]
-    E --> F[CAS 标记 directive_status=CONSUMED]
-    F --> G{feedbackType?}
-    G -.ACCEPTED.-> H[追加 executedSteps]
-    G -.IGNORED.-> I[120s 静默 intentCode]
-    G -.WRONG_INTENT.-> J[整通话静默 intentCode]
-    G -.WRONG_FUNCTION.-> K[整通话静默 actionId]
-    H --> L[更新 feedback_log is_effective=Y]
-    I --> L
-    J --> L
-    K --> L
 ```
 
 ### 17.4 关键代码骨架
 
 ```java
-@Slf4j
 @Service
 public class FeedbackService {
 
     @Autowired private MetricsService metricsService;
-    @Autowired private FeedbackEffectProcessor feedbackEffectProcessor;
 
     public FeedbackResult handleFeedback(FeedbackRequest req) {
         validateBasic(req);
-        // 1. 先记录反馈事件，失败只打日志，不阻塞接口返回
-        String feedbackLogId = metricsService.recordFeedback(req, null, false);
-        // 2. 异步让反馈生效
-        try {
-            feedbackEffectProcessor.applyAsync(req, feedbackLogId);
-        } catch (RuntimeException e) {
-            log.warn("[M11] Submit async feedback effect failed, directiveId={}", req.getDirectiveId(), e);
-        }
+        // MVP：只采集反馈结果写 ES，失败只打日志，不阻塞接口返回
+        metricsService.recordFeedback(req, null, false);
         return FeedbackResult.success("RECORDED");
-    }
-}
-
-@Service
-public class FeedbackEffectProcessor {
-
-    @Async("feedbackEffectExecutor")
-    public void applyAsync(FeedbackRequest req, String feedbackLogId) {
-        TriggerLogRecord triggerLog = triggerLogDao.findByDirectiveId(req.getDirectiveId());
-        if (triggerLog == null) {
-            return;
-        }
-        if (triggerLog.getExpireAt() != null 
-                && Instant.now().isAfter(triggerLog.getExpireAt())) {
-            return;
-        }
-        if (!triggerLog.getCallId().equals(req.getCallId())
-                || !Objects.equals(triggerLog.getOperatorId(), req.getOperatorId())
-                || !Objects.equals(triggerLog.getIntentCode(), req.getIntentCode())
-                || !Objects.equals(triggerLog.getActionId(), req.getActionId())) {
-            return;
-        }
-        if (!triggerLogDao.markDirectiveConsumedIfOpen(req.getDirectiveId())) {
-            return;
-        }
-        switch (req.getFeedbackType()) {
-            case "ACCEPTED":
-                stepsManager.appendStep(req.getCallId(), req.getIntentCode(), req.getIntentName());
-                break;
-            case "IGNORED":
-                muteListManager.muteIntent(req.getCallId(), req.getIntentCode(), 120);
-                break;
-            case "WRONG_INTENT":
-                muteListManager.muteIntentForCall(req.getCallId(), req.getIntentCode());
-                break;
-            case "WRONG_FUNCTION":
-                muteListManager.muteActionForCall(req.getCallId(), req.getActionId());
-                break;
-            default:
-                break;
-        }
-        feedbackLogDao.markEffective(feedbackLogId, triggerLog.getLogId());
     }
 }
 ```
 
-反馈异步生效使用独立 `feedbackEffectExecutor`，默认核心线程数 4、最大线程数 16、队列 1000，可通过 `copilot.feedback.async.*` 调整。异步任务提交失败时只记录 `[M11]` 日志，不影响反馈接口返回。
+MVP 阶段反馈接口定位为埋点采集，不做 `trigger_log` 反查、不做 CAS 消费指令，也不更新 executedSteps / 静默列表。后续如果要恢复严格反馈闭环，需要重新启用最小 directive 状态存储或 TDSQL trigger_log。
 
-#### 数据库幂等保证
+#### ES 写入保证
 
-> DD-V1.2 P1-14：trigger_log.directive_id 唯一索引；feedback_log 增加 is_effective 字段。
-> 详见第四篇 21 章 DDL。
+反馈结果写 ES 使用 best-effort 策略，ES 写入失败只记录 `[M16]` 告警，不影响反馈接口返回。
 
 ### 17.5 静默列表
 
@@ -1952,12 +1890,12 @@ public class MuteListManager {
 
 ### 18.1 埋点目标
 
-> 按你的指示：业务面监控只做数据落库，不做看板。看板留待 F10 / F11 后续实现。
+> MVP 调整：业务面监控先采集，不做看板。调用/触发日志输出应用日志，反馈结果写 ES；看板留待 F10 / F11 实现。
 
 ```
-落库的是结构化业务数据，便于：
+采集的是结构化业务数据，便于：
   - 后续基于这些数据做看板（F10、F11）
-  - 运营人员通过 SQL 查询做 Bad Case 分析
+  - 运营人员通过日志检索 / ES 查询做 Bad Case 分析
   - 配置质量评估
 ```
 
@@ -1995,16 +1933,16 @@ flowchart TD
 
 ```
 反馈接口入口（M11）
-  - 记录每条反馈
+  - MVP 阶段写入 ES 索引 cs-copilot-feedback-log
   - 字段含 directiveId / call_id / operator_id / intentCode / actionId / menuItemId / feedbackType
 ```
 
 ### 18.5 关键字段（DD-V1.2 扩展 P1-16，详细 DDL 见第四篇）
 
-> DD-V1.2 增加 result_status / reason_code / filter_stage 等字段，便于 Bad Case 分析和后续看板。
+> MVP 阶段触发日志先输出应用日志，不写 trigger_log 表；反馈结果写 ES。以下字段作为日志/ES 文档结构，TDSQL DDL 作为后续严格反馈闭环预留。
 
 ```
-cs_copilot_trigger_log（触发日志，DD-V1.2 字段扩展）
+trigger application log（触发日志）
   log_id              主键
   call_id             通话 ID
   operator_id         坐席工号
@@ -2016,7 +1954,7 @@ cs_copilot_trigger_log（触发日志，DD-V1.2 字段扩展）
   menu_item_id        可选关联菜单项
   candidate_count     候选数量
   risk_level          风险等级
-  directive_id        指令 ID（UNIQUE 索引 P0-6）
+  directive_id        指令 ID
   expire_at           指令过期时间（DD-V1.2 P0-6）
   directive_status    指令状态（DD-V1.2 P0-6）
   
@@ -2029,17 +1967,17 @@ cs_copilot_trigger_log（触发日志，DD-V1.2 字段扩展）
   trigger_time        触发时间
   config_version      配置版本
 
-cs_copilot_feedback_log（反馈日志，DD-V1.2 字段扩展）
+ES index: cs-copilot-feedback-log（反馈结果）
   log_id              主键
   directive_id        指令 ID
-  trigger_log_id      关联触发日志（DD-V1.2 P1-15 强制反查）
+  trigger_log_id      MVP 阶段为空
   call_id             通话 ID
   operator_id         坐席工号
   feedback_type       反馈类型
   intent_code         意图代码
   action_id           Copilot 动作 ID
   menu_item_id        可选关联菜单项
-  is_effective        是否有效反馈 Y/N（DD-V1.2 P1-14 幂等）
+  is_effective        MVP 阶段固定 N，仅表示未做严格生效闭环
   feedback_time       反馈时间
 ```
 
@@ -2094,7 +2032,7 @@ FRONT_COOLDOWN             前端频控层
 ### 18.6 后续看板（F10/F11）依赖
 
 ```
-本期落库的字段足够支撑后续看板：
+MVP 采集的日志/ES 字段足够支撑后续看板：
   - 触发统计：按 intent_code / action_id / menu_item_id 分组 COUNT
   - 采纳率：feedback_log JOIN trigger_log
   - 错误推荐：feedback_type IN (WRONG_INTENT, WRONG_FUNCTION)
@@ -3369,11 +3307,8 @@ sequenceDiagram
     FE->>FE: 按 paramKey 拼接 URL 或组件 props
     FE->>FE: M15 执行 5 种打开方式之一
     FE->>SVC: POST /copilot/feedback (ACCEPTED)
-    SVC->>SVC: Best-effort 记录 feedback_log(is_effective=N)
+    SVC->>ES: Best-effort 写入反馈结果
     SVC-->>FE: RECORDED
-    SVC->>SVC: 异步校验 trigger_log 并 CAS 消费指令
-    SVC->>SVC: 异步追加 executedSteps / 静默列表
-    SVC->>SVC: 异步标记 feedback_log(is_effective=Y)
 
     Note over OP: 通话结束
     FE->>SVC: POST /copilot/session/unbind
@@ -3581,64 +3516,48 @@ Redis 容量：
 
 ## 35. 业务监控指标
 
-> DD-V1.1 调整：应用日志、接口监控用行内已有基础设施，本节仅描述业务面监控的落库字段。**不做看板**，看板留待 F10/F11 实现。
+> MVP 调整：调用/触发日志先输出应用日志；反馈结果写入 ES。**不做看板**，看板留待 F10/F11 实现。
 
-### 35.1 业务面埋点（仅落库）
+### 35.1 业务面埋点（MVP）
 
 #### 触发日志埋点（M07 + M16）
 
-每次意图识别后落 `cs_copilot_trigger_log` 一行记录：
+每次意图识别后输出一条结构化应用日志：
 
 ```
-意图识别成功 → 落库 1 行
+意图识别成功 → log.info 1 行
   - intent_code: 实际识别的意图
   - action_id: 匹配到的 Copilot 动作（NULL=无映射）
   - menu_item_id: 可选关联菜单项
   - candidate_count: 候选总数
   - directive_id: 推送的指令 ID
 
-意图识别失败 → 落库 1 行
+意图识别失败 → log.info 1 行
   - intent_code: NULL
   - result_status: FAIL
 ```
 
 #### 反馈日志埋点（M11 + M16）
 
-每次反馈落 `cs_copilot_feedback_log` 一行：
+每次反馈写入 ES 索引 `cs-copilot-feedback-log`：
 
 ```
-所有反馈类型都落库：
+所有反馈类型都写 ES：
   - feedback_type: ACCEPTED / IGNORED / WRONG_INTENT / WRONG_FUNCTION
-  - directive_id: 关联触发日志
+  - directive_id: 前端反馈携带的指令 ID
 ```
 
 ### 35.2 后续看板（F10/F11）能基于已有埋点实现
 
-```sql
--- 采纳率（基于本期埋点可直接计算）
-SELECT
-    COUNT(CASE WHEN feedback_type = 'ACCEPTED' THEN 1 END) * 1.0
-        / COUNT(directive_id) AS accept_rate
-FROM cs_copilot_trigger_log t
-LEFT JOIN cs_copilot_feedback_log f ON t.directive_id = f.directive_id
-WHERE t.trigger_time >= DATE '2026-04-24';
+```
+MVP 数据源：
+  - 触发日志：应用日志，按 [M16] Copilot trigger log 采集
+  - 反馈结果：ES 索引 cs-copilot-feedback-log
 
--- 无映射意图 TopN
-SELECT intent_code, COUNT(*) AS no_mapping_count
-FROM cs_copilot_trigger_log
-WHERE action_id IS NULL
-GROUP BY intent_code
-ORDER BY no_mapping_count DESC
-LIMIT 10;
-
--- Action 采纳率
-SELECT t.action_id,
-       COUNT(CASE WHEN f.feedback_type = 'ACCEPTED' THEN 1 END) * 1.0
-           / NULLIF(COUNT(t.directive_id), 0) AS accept_rate
-FROM cs_copilot_trigger_log t
-LEFT JOIN cs_copilot_feedback_log f ON t.directive_id = f.directive_id
-WHERE t.trigger_time >= NOW() - INTERVAL '1 day'
-GROUP BY t.action_id;
+可计算指标：
+  - 采纳率：ES 中 feedback_type=ACCEPTED 的反馈数 / 应用日志中成功推送数
+  - 无映射意图 TopN：应用日志中 reason_code=INTENT_NOT_MAPPED 的 intent_code 聚合
+  - Action 反馈分布：ES 按 action_id + feedback_type 聚合
 ```
 
 ### 35.3 应用日志与接口监控
@@ -3738,7 +3657,6 @@ cs-copilot-service/
 │   │   │   └── UrlBuilder.java
 │   │   └── feedback/
 │   │       ├── FeedbackService.java
-│   │       ├── FeedbackEffectProcessor.java
 │   │       └── MuteListManager.java
 │   │
 │   ├── asr/                         # ASR 接入层
@@ -4120,11 +4038,11 @@ gantt
 **功能描述**：采纳率、推荐分布、坐席行为分析。
 
 **实现方式**：
-- 复用本期已埋点的 `cs_copilot_trigger_log` 和 `cs_copilot_feedback_log`
+- 复用本期触发应用日志与反馈 ES 索引
 - 新建 BI 看板（Grafana / 内部 BI 工具）
-- 不需要新增表
+- 不需要新增表，后续可按需接入日志平台或 ES 聚合
 
-**与本期关联**：本期已落库的字段足够支撑后续看板。
+**与本期关联**：本期已采集的字段足够支撑后续看板。
 
 **优先级**：P2
 
@@ -4186,13 +4104,13 @@ F03/F04/F06/F07/F08/F09/F11/F12 详细规划与 DD-V1.0 一致，扩展接入路
 | 灰度 | 双重灰度 | F07 待实现 |
 | 跨环境同步 | biz_key + env_map | F08 待实现 |
 | 沙箱 | 配置 + AI 评估 | F09 待实现 |
-| 看板 | 业务 + 配置质量 | 仅落库，F10/F11 待实现 |
+| 看板 | 业务 + 配置质量 | 仅采集日志/ES 数据，F10/F11 待实现 |
 | 意图树 | 数据库 + 一键发布 | Spring 配置文件 |
 | **服务端权限校验**（DD-V1.1） | IAM 接口校验 | **删除，前端控制；F13 待实现** |
 | **外部接口客户端**（DD-V1.1） | RestTemplate | **Spring Cloud OpenFeign** |
 | **URL 拼接**（DD-V1.1） | 服务端拼完整 URL | **服务端透传 paramConfigs + 前端取业务参数** |
 | **会话保存与过滤**（DD-V1.1） | 一起处理 | **保存全量 + 调 AI 时过滤** |
-| **业务监控**（DD-V1.1） | 完整看板 | **仅落库，看板后续做** |
+| **业务监控**（DD-V1.1） | 完整看板 | **调用日志打应用日志，反馈写 ES，看板后续做** |
 | 数据模型 | 10+ 张表 | 4 张新增表 |
 | 工时（一阶段） | 60-65 人日 | 64 人日 |
 
