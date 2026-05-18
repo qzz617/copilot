@@ -1831,8 +1831,9 @@ public class CopilotPushService {
 ```mermaid
 flowchart TD
     A[POST /copilot/feedback] --> B[校验参数]
-    B --> C[Best-effort 写入 ES<br/>cs-copilot-feedback-log]
+    B --> C[投递有界异步队列]
     C --> D[立即返回 RECORDED]
+    C --> E[后台写入 ES<br/>cs-copilot-feedback-log]
 ```
 
 ### 17.4 关键代码骨架
@@ -1845,7 +1846,7 @@ public class FeedbackService {
 
     public FeedbackResult handleFeedback(FeedbackRequest req) {
         validateBasic(req);
-        // MVP：只采集反馈结果写 ES，失败只打日志，不阻塞接口返回
+        // MVP：只采集反馈结果，投递有界异步队列后立即返回
         metricsService.recordFeedback(req, null, false);
         return FeedbackResult.success("RECORDED");
     }
@@ -1856,7 +1857,7 @@ MVP 阶段反馈接口定位为埋点采集，不做 `trigger_log` 反查、不�
 
 #### ES 写入保证
 
-反馈结果写 ES 使用 Java High Level REST Client，采用 best-effort 策略，ES 写入失败只记录 `[M16]` 告警，不影响反馈接口返回。
+反馈结果先投递到有界异步队列，再由后台线程使用 Java High Level REST Client 写入 ES。队列满或 ES 写入失败只记录 `[M16]` 告警，不影响反馈接口返回。
 
 ### 17.5 静默列表
 
@@ -3539,7 +3540,7 @@ Redis 容量：
 
 #### 反馈日志埋点（M11 + M16）
 
-每次反馈通过 Java High Level REST Client 写入 ES 索引 `cs-copilot-feedback-log`：
+每次反馈先投递有界异步队列，再通过 Java High Level REST Client 写入 ES 索引 `cs-copilot-feedback-log`：
 
 ```
 所有反馈类型都写 ES：

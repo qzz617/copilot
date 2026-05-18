@@ -5,6 +5,7 @@ import com.cmbchina.cs.assitsvc.config.CopilotConfigCache;
 import com.cmbchina.cs.assitsvc.config.CopilotConfigRepository;
 import com.cmbchina.cs.assitsvc.core.intent.IntentTreeLoader;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -51,7 +52,8 @@ public class HealthController {
 
     private String checkRedis() {
         try {
-            String pong = redisTemplate.execute(connection -> connection.ping());
+            String pong = redisTemplate.execute(
+                    (RedisCallback<String>) connection -> connection.ping());
             return "PONG".equals(pong) ? "UP" : "DOWN";
         } catch (Exception e) {
             return "DOWN";

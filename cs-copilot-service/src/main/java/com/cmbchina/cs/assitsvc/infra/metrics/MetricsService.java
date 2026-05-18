@@ -5,22 +5,30 @@ import com.cmbchina.cs.assitsvc.domain.CallSession;
 import com.cmbchina.cs.assitsvc.domain.DirectiveDTO;
 import com.cmbchina.cs.assitsvc.domain.FeedbackRequest;
 import com.cmbchina.cs.assitsvc.domain.ItemCandidate;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.core.task.TaskRejectedException;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.util.UUID;
+import java.util.concurrent.Executor;
 
 /**
  * 业务监控埋点服务。
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class MetricsService {
 
     private final FeedbackEsClient feedbackEsClient;
+    private final Executor feedbackMetricsExecutor;
+
+    public MetricsService(FeedbackEsClient feedbackEsClient,
+                          @Qualifier("feedbackMetricsExecutor") Executor feedbackMetricsExecutor) {
+        this.feedbackEsClient = feedbackEsClient;
+        this.feedbackMetricsExecutor = feedbackMetricsExecutor;
+    }
 
     /**
      * 记录成功推送日志。
@@ -100,11 +108,27 @@ public class MetricsService {
                     .isEffective(effective ? "Y" : "N")
                     .feedbackTime(parseInstant(request.getFeedbackTime()))
                     .build();
-            feedbackEsClient.index(record);
+            feedbackMetricsExecutor.execute(new Runnable() {
+                @Override
+                public void run() {
+                    indexFeedback(record);
+                }
+            });
             return logId;
-        } catch (Exception e) {
-            log.warn("[M16] Record feedback failed, directiveId={}", request.getDirectiveId(), e);
+        } catch (TaskRejectedException e) {
+            log.warn("[M16] Feedback metrics queue full, directiveId={}", request.getDirectiveId(), e);
             return null;
+        } catch (Exception e) {
+            log.warn("[M16] Submit feedback metrics failed, directiveId={}", request.getDirectiveId(), e);
+            return null;
+        }
+    }
+
+    private void indexFeedback(FeedbackLogRecord record) {
+        try {
+            feedbackEsClient.index(record);
+        } catch (Exception e) {
+            log.warn("[M16] Record feedback failed, directiveId={}", record.getDirectiveId(), e);
         }
     }
 

@@ -164,6 +164,10 @@ copilot:
   # MVP 阶段监控埋点
   metrics:
     # 调用/触发日志先通过应用日志输出；反馈结果写入 ES。
+    feedback-async:
+      core-size: ${COPILOT_FEEDBACK_ASYNC_CORE_SIZE:2}
+      max-size: ${COPILOT_FEEDBACK_ASYNC_MAX_SIZE:4}
+      queue-capacity: ${COPILOT_FEEDBACK_ASYNC_QUEUE_CAPACITY:1000}
     feedback-es:
       enabled: ${COPILOT_FEEDBACK_ES_ENABLED:true}
       # 多节点可用逗号分隔，例如 http://es-1:9200,http://es-2:9200
