@@ -43,15 +43,11 @@ com.cmbchina.cs.assitsvc.domain
 ├── CallSession                # 通话会话
 ├── IntentResult               # 意图识别结果
 ├── IntentTreeNode             # 意图树节点
-├── ItemFullConfig             # 功能完整配置（含 CopilotExt）
-├── CopilotExt                 # Copilot 扩展配置
+├── CopilotActionConfig        # Copilot 动作完整配置
 ├── IntentMapping              # 意图映射
-├── ItemReference              # 功能引用（itemId + priority）
-├── ItemParam                  # 功能参数
-├── ItemCandidate              # 候选项
-├── ConditionRule              # 条件规则
-├── ConditionItem              # 条件项
-├── EvaluationContext          # 评估上下文
+├── ActionReference            # 动作引用（actionId + priority）
+├── ItemParam                  # 动作参数
+├── ItemCandidate              # 候选动作
 ├── ParamContext               # 参数上下文
 ├── BuildContext               # 指令构建上下文
 ├── ExecutedStep               # 已执行步骤
@@ -62,8 +58,7 @@ com.cmbchina.cs.assitsvc.domain
 ├── ActionInfo                 # 指令-动作信息
 ├── RiskInfo                   # 指令-风险信息
 ├── FeedbackRequest            # 反馈请求
-├── MenuVersionData            # CLOB 数据
-└── CopilotIndex               # CLOB 反向索引
+└── CopilotConfigSnapshot      # Copilot 独立配置快照
 ```
 
 **关键约束**：
@@ -184,25 +179,9 @@ com.cmbchina.cs.assitsvc.core.param
 **验收标准**：
 - [ ] 枚举值与 DD-V1.2 第 15.1 节一致
 
-### Task U-2：RuleEvaluator
+### Task U-2：条件规则评估
 
-**输入**：DD-V1.2 第 14.3 节
-
-**实现范围**：
-```
-com.cmbchina.cs.assitsvc.core.match
-├── RuleEvaluator              # 接口
-└── JsonRuleEvaluatorImpl      # 实现
-```
-
-**关键约束**：
-- 支持 `eq/not_eq/in/not_in/exists/not_exists/gt/gte/lt/lte`
-- DD-V1.2 P1-19：异常默认返回 false
-- 支持 `all`（AND）和 `any`（OR）组合
-
-**验收标准**：
-- [ ] 所有运算符正确
-- [ ] 异常时返回 false
+当前阶段不实现。`condition_rule` 已从 Copilot 动作表和意图映射表移除，后续如果需要精细条件过滤，再单独恢复规则模型与评估器。
 
 ### Task U-3：UrlBuilder（DD-V1.2 增强）
 
@@ -372,14 +351,14 @@ com.cmbchina.cs.assitsvc.core.intent
 com.cmbchina.cs.assitsvc.core.match
 ├── IntentFunctionMatcherService     # 接口
 ├── IntentFunctionMatcherServiceImpl # 实现
-├── CopilotConfigCache               # CLOB 内存缓存
-└── MenuVersionDao                   # 数据库读取
+├── CopilotConfigCache               # CopilotConfigSnapshot 内存缓存
+└── CopilotConfigRepository          # 独立配置表读取
 ```
 
 **关键约束**：
 - DD-V1.2 P1-9：先过 GrayPolicy（最简：operator 白名单）
 - DD-V1.2 P1-10：mapping_priority 仅在 cs_copilot_intent_mapping 中
-- DD-V1.2 P1-19：condition_rule 异常返回 false
+- 当前阶段不启用 condition_rule，候选过滤只保留启停、灰度、静默、风险等级和参数/URL 校验
 
 **验收标准**：
 - [ ] 单 intentCode 多候选按 priority 倒序
@@ -475,25 +454,26 @@ com.cmbchina.cs.assitsvc.config
 ```
 
 **关键约束**：
-- 每 30 秒查询 cs_menu_version 最新 active 版本
+- 每 30 秒查询 `cs_copilot_config_version` 最新已发布版本
 - 与本地 currentVersion 不一致时触发 reload
 - 用 `@Scheduled(fixedDelayString = "${copilot.config-refresh.polling-interval-ms}")`
 
 ---
 
-## 阶段 7：CLOB 扩展（涉及存量代码）
+## 阶段 7：Copilot 配置发布
 
-### Task M12：CLOB 生成扩展
+### Task M12：Copilot 配置发布与校验
 
 **输入**：DD-V1.2 第 22 章
 
 **关键约束**：
-- 改动存量代码（菜单管理后台一键发布逻辑）
-- 在 items 节点嵌入 copilotExt
-- 新增 copilotIndex 反向索引
+- 不改动 `cs_menu_version.config_data`
+- action/mapping 先按新 `version_id` 写入不可变快照行，校验通过后最后发布 `cs_copilot_config_version`
+- 从同一 `version_id` 的 `cs_copilot_action`、`cs_copilot_intent_mapping` 构建运行时快照
+- 关联 `menu_item_id` 时读取 `cs_menu_item` 做存在性、启用状态和快照一致性校验
 - DD-V1.2 P1-8：发布前基础校验
 
-**协调对象**：存量发布团队
+**协调对象**：Copilot 配置后台团队；若关联菜单项，需要与菜单配置团队确认启用值和打开方式契约
 
 ---
 
@@ -507,6 +487,7 @@ com.cmbchina.cs.assitsvc.config
 ```
 com.cmbchina.cs.assitsvc.api.controller
 └── AdminController            # POST /copilot/admin/config/refresh
+                                  POST /copilot/admin/config/validate
                                   POST /copilot/admin/intent-tree/reload
                                   GET  /copilot/health
 ```

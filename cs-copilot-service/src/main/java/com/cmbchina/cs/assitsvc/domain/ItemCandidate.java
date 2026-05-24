@@ -6,7 +6,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 /**
- * 候选项，意图-功能匹配后的结果，包含完整配置和优先级。
+ * 候选动作，意图-动作匹配后的结果，包含完整配置和优先级。
  */
 @Data
 @Builder
@@ -14,12 +14,12 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class ItemCandidate {
 
-    /** 功能 ID */
-    private Long itemId;
+    /** Copilot 动作 ID */
+    private String actionId;
 
     /** 映射优先级（倒序排列，值越大越优先） */
     private Integer priority;
 
-    /** 功能完整配置 */
-    private ItemFullConfig config;
+    /** 动作完整配置 */
+    private CopilotActionConfig config;
 }

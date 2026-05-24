@@ -27,7 +27,8 @@
 
         <spring-cloud.version>2021.0.9</spring-cloud.version>
         <fastjson.version>2.0.43</fastjson.version>
-        <jedis.version>3.8.0</jedis.version>
+        <mybatis-plus.version>3.5.7</mybatis-plus.version>
+        <postgresql.version>42.7.4</postgresql.version>
         <resilience4j.version>1.7.1</resilience4j.version>
     </properties>
 
@@ -78,22 +79,10 @@
             <artifactId>spring-kafka</artifactId>
         </dependency>
 
-        <!-- ============= Redis Jedis（明确不用 Lettuce） ============= -->
-        <!-- 排除 spring-data-redis 默认的 Lettuce -->
+        <!-- ============= RedisTemplate（Spring Data Redis，支持 standalone/sentinel/cluster 自动配置） ============= -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-data-redis</artifactId>
-            <exclusions>
-                <exclusion>
-                    <groupId>io.lettuce</groupId>
-                    <artifactId>lettuce-core</artifactId>
-                </exclusion>
-            </exclusions>
-        </dependency>
-        <dependency>
-            <groupId>redis.clients</groupId>
-            <artifactId>jedis</artifactId>
-            <version>${jedis.version}</version>
         </dependency>
         <dependency>
             <groupId>org.apache.commons</groupId>
@@ -119,15 +108,17 @@
             <version>${resilience4j.version}</version>
         </dependency>
 
-        <!-- ============= 数据库（连接 cs_menu_* 等存量表） ============= -->
+        <!-- ============= 数据库（MyBatis-Plus 连接 TDSQL PG 兼容库中的 cs_menu_* 等表） ============= -->
         <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-jdbc</artifactId>
+            <groupId>com.baomidou</groupId>
+            <artifactId>mybatis-plus-boot-starter</artifactId>
+            <version>${mybatis-plus.version}</version>
         </dependency>
-        <!-- 由团队 DBA 确认实际数据库类型，此处用 PostgreSQL 占位 -->
+        <!-- TDSQL PG 兼容协议使用 PostgreSQL JDBC 驱动 -->
         <dependency>
             <groupId>org.postgresql</groupId>
             <artifactId>postgresql</artifactId>
+            <version>${postgresql.version}</version>
             <scope>runtime</scope>
         </dependency>
 
@@ -148,24 +139,12 @@
             <artifactId>commons-codec</artifactId>
         </dependency>
 
-        <!-- ============= 集成测试（不写单测，仅集成测试） ============= -->
+        <!-- ============= Elasticsearch High Level REST Client（MVP 反馈结果写入 ES） ============= -->
         <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-test</artifactId>
-            <scope>test</scope>
+            <groupId>org.elasticsearch.client</groupId>
+            <artifactId>elasticsearch-rest-high-level-client</artifactId>
         </dependency>
-        <dependency>
-            <groupId>org.springframework.kafka</groupId>
-            <artifactId>spring-kafka-test</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <!-- WireMock：Mock AI 接口 -->
-        <dependency>
-            <groupId>com.github.tomakehurst</groupId>
-            <artifactId>wiremock-jre8</artifactId>
-            <version>2.35.0</version>
-            <scope>test</scope>
-        </dependency>
+
     </dependencies>
 
     <build>

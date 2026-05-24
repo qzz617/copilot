@@ -2,13 +2,11 @@ package com.cmbchina.cs.assitsvc.core.match;
 
 import com.cmbchina.cs.assitsvc.config.CopilotConfigCache;
 import com.cmbchina.cs.assitsvc.core.feedback.MuteListManager;
+import com.cmbchina.cs.assitsvc.domain.ActionReference;
 import com.cmbchina.cs.assitsvc.domain.CallSession;
-import com.cmbchina.cs.assitsvc.domain.CopilotExt;
-import com.cmbchina.cs.assitsvc.domain.EvaluationContext;
+import com.cmbchina.cs.assitsvc.domain.CopilotActionConfig;
 import com.cmbchina.cs.assitsvc.domain.IntentResult;
 import com.cmbchina.cs.assitsvc.domain.ItemCandidate;
-import com.cmbchina.cs.assitsvc.domain.ItemFullConfig;
-import com.cmbchina.cs.assitsvc.domain.ItemReference;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -17,12 +15,10 @@ import org.springframework.util.StringUtils;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
- * 意图-功能匹配服务实现。
+ * 意图-动作匹配服务实现。
  */
 @Slf4j
 @Service
@@ -30,7 +26,6 @@ import java.util.Map;
 public class IntentFunctionMatcherServiceImpl implements IntentFunctionMatcherService {
 
     private final CopilotConfigCache configCache;
-    private final RuleEvaluator ruleEvaluator;
     private final GrayWhitelistFilter grayWhitelistFilter;
     private final MuteListManager muteListManager;
 
@@ -53,20 +48,19 @@ public class IntentFunctionMatcherServiceImpl implements IntentFunctionMatcherSe
             return Collections.emptyList();
         }
 
-        List<ItemReference> refs = configCache.findCandidatesByIntent(intentResult.getIntentCode());
+        List<ActionReference> refs = configCache.findCandidatesByIntent(intentResult.getIntentCode());
         if (refs.isEmpty()) {
-            log.debug("[M07] No item mapping for intent, callId={}, intentCode={}",
+            log.debug("[M07] No action mapping for intent, callId={}, intentCode={}",
                     session.getCallId(), intentResult.getIntentCode());
             return Collections.emptyList();
         }
 
-        EvaluationContext ctx = buildEvaluationContext(session);
         List<ItemCandidate> candidates = new ArrayList<>();
-        for (ItemReference ref : refs) {
-            if (muteListManager.isItemMuted(session.getCallId(), ref == null ? null : ref.getItemId())) {
+        for (ActionReference ref : refs) {
+            if (muteListManager.isActionMuted(session.getCallId(), ref == null ? null : ref.getActionId())) {
                 continue;
             }
-            ItemCandidate candidate = toCandidate(ref, ctx);
+            ItemCandidate candidate = toCandidate(ref);
             if (candidate != null) {
                 candidates.add(candidate);
             }
@@ -81,72 +75,29 @@ public class IntentFunctionMatcherServiceImpl implements IntentFunctionMatcherSe
         return candidates;
     }
 
-    private ItemCandidate toCandidate(ItemReference ref, EvaluationContext ctx) {
-        if (ref == null || ref.getItemId() == null) {
+    private ItemCandidate toCandidate(ActionReference ref) {
+        if (ref == null || !StringUtils.hasText(ref.getActionId())) {
             return null;
         }
 
-        ItemFullConfig item = configCache.getItemConfig(ref.getItemId());
-        if (item == null || !isCopilotEnabled(item) || isRiskDisabled(item)) {
-            return null;
-        }
-
-        String conditionRule = conditionRule(item);
-        if (!ruleEvaluator.evaluate(conditionRule, ctx)) {
+        CopilotActionConfig action = configCache.getActionConfig(ref.getActionId());
+        if (action == null || !isCopilotEnabled(action) || isRiskDisabled(action)) {
             return null;
         }
 
         return ItemCandidate.builder()
-                .itemId(ref.getItemId())
+                .actionId(ref.getActionId())
                 .priority(ref.getPriority())
-                .config(item)
+                .config(action)
                 .build();
     }
 
-    private static EvaluationContext buildEvaluationContext(CallSession session) {
-        Map<String, Object> sessionData = new HashMap<>();
-        sessionData.put("customer.customerId", session.getCustomerId());
-        sessionData.put("customer.customerType", session.getCustomerType());
-        sessionData.put("customerId", session.getCustomerId());
-        sessionData.put("customerType", session.getCustomerType());
-
-        Map<String, Object> callMetaData = new HashMap<>();
-        callMetaData.put("callId", session.getCallId());
-
-        return EvaluationContext.builder()
-                .callId(session.getCallId())
-                .operatorId(session.getOperatorId())
-                .customerId(session.getCustomerId())
-                .customerType(session.getCustomerType())
-                .sessionData(sessionData)
-                .callMetaData(callMetaData)
-                .build();
+    private static boolean isCopilotEnabled(CopilotActionConfig action) {
+        return Boolean.TRUE.equals(action.getEnabled());
     }
 
-    private static boolean isCopilotEnabled(ItemFullConfig item) {
-        CopilotExt ext = item.getCopilotExt();
-        if (ext != null && ext.getEnabled() != null) {
-            return ext.getEnabled();
-        }
-        return Boolean.TRUE.equals(item.getCopilotEnabled());
-    }
-
-    private static boolean isRiskDisabled(ItemFullConfig item) {
-        String riskLevel = riskLevel(item);
-        return "DISABLED".equalsIgnoreCase(riskLevel);
-    }
-
-    private static String riskLevel(ItemFullConfig item) {
-        CopilotExt ext = item.getCopilotExt();
-        if (ext != null && StringUtils.hasText(ext.getRiskLevel())) {
-            return ext.getRiskLevel();
-        }
-        return item.getRiskLevel();
-    }
-
-    private static String conditionRule(ItemFullConfig item) {
-        CopilotExt ext = item.getCopilotExt();
-        return ext == null ? null : ext.getConditionRule();
+    private static boolean isRiskDisabled(CopilotActionConfig action) {
+        return "DISABLED".equalsIgnoreCase(action.getRiskLevel());
     }
 
     private static int priority(ItemCandidate candidate) {

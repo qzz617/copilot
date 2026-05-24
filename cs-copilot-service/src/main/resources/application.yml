@@ -20,25 +20,25 @@ spring:
       ack-mode: MANUAL_IMMEDIATE
       concurrency: 4
 
-  # ============= Redis 配置（Jedis 客户端，不是 Lettuce） =============
+  # ============= Redis 配置（RedisTemplate，默认 Lettuce，生产可切换 Sentinel/Cluster） =============
   redis:
     host: ${REDIS_HOST:localhost}
     port: ${REDIS_PORT:6379}
     password: ${REDIS_PASSWORD:}
     database: 0
     timeout: 2000ms
-    jedis:
+    lettuce:
       pool:
         max-active: 20
         max-idle: 10
         min-idle: 2
         max-wait: 2000ms
 
-  # ============= 数据源（cs_menu_* 等存量表 + Copilot 新增表） =============
+  # ============= 数据源（TDSQL PG 兼容库：cs_menu_* 等存量表 + Copilot 新增表） =============
   datasource:
     url: ${DATASOURCE_URL:jdbc:postgresql://localhost:5432/cccs}
     username: ${DATASOURCE_USERNAME:cccs}
-    password: ${DATASOURCE_PASSWORD:cccs}
+    password: ${DATASOURCE_PASSWORD}
     driver-class-name: org.postgresql.Driver
     hikari:
       maximum-pool-size: 10
@@ -84,13 +84,18 @@ copilot:
     # confidence 缺失策略：true=允许通过，false=拒绝
     asr-confidence-default-pass: true
     dedup-ttl-hours: 2
+    # 生产要求 Kafka record key = callId，保证同一通话 ASR 进入同一分区
+    require-call-id-key: true
 
-  # 防抖参数
-  debounce:
-    complete-ms: 500
-    neutral-ms: 1500
-    incomplete-ms: 3000
-    silence-ms: 2000
+  # 意图识别触发窗口（MVP 固定窗口策略）
+  # 首条客户句子起算 window-ms 毫秒，到期触发一次意图识别；
+  # 窗口期内的句子仅追加到对话历史，不重置 timer。
+  intent-trigger:
+    window-ms: 5000
+    polling-interval-ms: 200
+    polling-batch-size: 100
+    # fire 抛异常后该通话进入冷却的时长（ms），期间不再开新窗口
+    fire-failure-cooldown-ms: 30000
 
   # 意图树（配置文件，本期固定值）
   intent-tree:
@@ -108,8 +113,6 @@ copilot:
     - frdctrfront.paas.cmbchina.cn
     - mccusweb.paas.cmbchina.cn
     - cccsweb.paas.cmbchina.cn
-    - frdctrfront.paasuat.cmbchina.cn
-    - mccusweb.paasuat.cmbchina.cn
 
   # URL Builder 配置（DD-V1.2 P0-5）
   url-builder:
@@ -120,26 +123,9 @@ copilot:
     # 同名参数冲突策略：OVERRIDE / PRESERVE / ERROR
     same-key-policy: OVERRIDE
 
-  # Cookie 占位符配置（DD-V1.2 P0-4）
-  cookie-placeholder:
-    enabled: true
-    # 允许使用的 Cookie 名白名单
-    allowed-cookies:
-      - workbenchSession
-    # Cookie 与目标域名绑定
-    domain-bindings:
-      frdctrfront.paas.cmbchina.cn:
-        - workbenchSession
-      frdctrfront.paasuat.cmbchina.cn:
-        - workbenchSession
-    # 必填 Cookie（缺失时阻断打开，不保留占位符）
-    required-cookies:
-      - workbenchSession
-
-  # 单通话限制（DD-V1.2 P1-4）
-  call-limits:
-    max-ai-calls: 50
-    intent-cooldown-sec: 60
+  # 指令有效期
+  directive:
+    expire-seconds: 30
 
   # 灰度白名单（DD-V1.2 P1-9，最简方案）
   gray:
@@ -148,14 +134,45 @@ copilot:
     operator-whitelist:
       - ho212121
 
+  # 管理接口鉴权
+  admin:
+    auth:
+      enabled: true
+      header-name: X-Copilot-Admin-Token
+      token: ${COPILOT_ADMIN_TOKEN:}
+
+  # WebSocket Origin 白名单
+  websocket:
+    allowed-origin-patterns:
+      - https://frdctrfront.paas.cmbchina.cn
+      - https://mccusweb.paas.cmbchina.cn
+      - https://cccsweb.paas.cmbchina.cn
+      - https://frdctrfront.paasuat.cmbchina.cn
+      - https://mccusweb.paasuat.cmbchina.cn
+    cluster-push-channel: copilot:push:directive
+    operator-id-header: X-Copilot-Operator-Id
+    operator-id-query-param: operatorId
+
   # 多 Pod 配置一致性轮询（DD-V1.2 P1-17）
   config-refresh:
     polling-interval-ms: 30000
 
-  # CLOB 配置读取（字段名按存量 cs_menu_version 实际结构可覆盖）
-  config:
-    latest-clob-sql: SELECT config_data FROM svccfg.cs_menu_version ORDER BY created_time DESC LIMIT 1
-    latest-version-sql: SELECT version FROM svccfg.cs_menu_version ORDER BY created_time DESC LIMIT 1
+  # MVP 阶段监控埋点
+  metrics:
+    # 调用/触发日志先通过应用日志输出；反馈结果写入 ES。
+    feedback-async:
+      core-size: ${COPILOT_FEEDBACK_ASYNC_CORE_SIZE:2}
+      max-size: ${COPILOT_FEEDBACK_ASYNC_MAX_SIZE:4}
+      queue-capacity: ${COPILOT_FEEDBACK_ASYNC_QUEUE_CAPACITY:1000}
+    feedback-es:
+      enabled: ${COPILOT_FEEDBACK_ES_ENABLED:true}
+      # 多节点可用逗号分隔，例如 http://es-1:9200,http://es-2:9200
+      base-url: ${COPILOT_FEEDBACK_ES_URL:http://localhost:9200}
+      index-name: ${COPILOT_FEEDBACK_ES_INDEX:cs-copilot-feedback-log}
+      username: ${COPILOT_FEEDBACK_ES_USERNAME:}
+      password: ${COPILOT_FEEDBACK_ES_PASSWORD:}
+      connect-timeout-ms: ${COPILOT_FEEDBACK_ES_CONNECT_TIMEOUT_MS:1000}
+      read-timeout-ms: ${COPILOT_FEEDBACK_ES_READ_TIMEOUT_MS:1000}
 
   # ============= M03 对话历史管理 =============
   history:

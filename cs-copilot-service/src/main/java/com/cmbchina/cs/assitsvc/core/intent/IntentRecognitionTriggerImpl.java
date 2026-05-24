@@ -4,29 +4,31 @@ import com.cmbchina.cs.assitsvc.config.CopilotConfigCache;
 import com.cmbchina.cs.assitsvc.core.directive.DirectiveBuildException;
 import com.cmbchina.cs.assitsvc.core.directive.DirectiveBuilderService;
 import com.cmbchina.cs.assitsvc.core.directive.UrlValidationException;
+import com.cmbchina.cs.assitsvc.core.event.DirectiveFailedEvent;
+import com.cmbchina.cs.assitsvc.core.event.DirectivePreparedEvent;
 import com.cmbchina.cs.assitsvc.core.match.IntentFunctionMatcherService;
 import com.cmbchina.cs.assitsvc.domain.BuildContext;
 import com.cmbchina.cs.assitsvc.domain.CallSession;
 import com.cmbchina.cs.assitsvc.domain.DirectiveDTO;
 import com.cmbchina.cs.assitsvc.domain.IntentResult;
 import com.cmbchina.cs.assitsvc.domain.ItemCandidate;
-import com.cmbchina.cs.assitsvc.domain.ParamContext;
 import com.cmbchina.cs.assitsvc.infra.metrics.FilterStageConstants;
-import com.cmbchina.cs.assitsvc.infra.metrics.MetricsService;
 import com.cmbchina.cs.assitsvc.infra.metrics.ReasonCodeConstants;
-import com.cmbchina.cs.assitsvc.push.CopilotPushService;
 import com.cmbchina.cs.assitsvc.session.CallSessionManager;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
  * 意图识别触发编排实现。
+ *
+ * <p>本类仅负责"分内事"：意图识别 → 匹配 → 指令构建。
+ * 完成（或失败）后通过 {@link ApplicationEventPublisher} 发布事件，
+ * 推送、日志、埋点等"事后处理"由独立监听器承担（见 {@code core/event} 包）。
  */
 @Slf4j
 @Component
@@ -37,9 +39,8 @@ public class IntentRecognitionTriggerImpl implements IntentRecognitionTrigger {
     private final IntentRecognitionService intentRecognitionService;
     private final IntentFunctionMatcherService matcherService;
     private final DirectiveBuilderService directiveBuilderService;
-    private final CopilotPushService pushService;
     private final CopilotConfigCache configCache;
-    private final MetricsService metricsService;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Override
     public void fire(String callId) {
@@ -50,99 +51,85 @@ public class IntentRecognitionTriggerImpl implements IntentRecognitionTrigger {
         CallSession session = callSessionManager.get(callId);
         if (session == null || !StringUtils.hasText(session.getOperatorId())) {
             log.warn("[M06] Call session missing, recommendation skipped, callId={}", callId);
-            metricsService.recordTriggerFailure(callId, null, null, null,
+            publishFailed(callId, null, null, null,
                     ReasonCodeConstants.SESSION_BIND_MISSING,
-                    FilterStageConstants.SESSION_BIND,
-                    configCache.getCurrentVersion());
+                    FilterStageConstants.SESSION_BIND);
             return;
         }
 
-        IntentResult intentResult = intentRecognitionService.recognize(callId);
-        if (intentResult == null || !StringUtils.hasText(intentResult.getIntentCode())) {
-            metricsService.recordTriggerFailure(callId, session, null, null,
-                    ReasonCodeConstants.INTENT_EMPTY,
-                    FilterStageConstants.INTENT_RECOGNITION,
-                    configCache.getCurrentVersion());
+        IntentRecognitionOutcome outcome = intentRecognitionService.recognize(callId);
+        if (outcome == null || !outcome.isSuccess()) {
+            String failReason = outcome == null ? ReasonCodeConstants.INTENT_EMPTY : outcome.getFailReason();
+            publishFailed(callId, session, null, null,
+                    failReason, FilterStageConstants.INTENT_RECOGNITION);
             return;
         }
+        IntentResult intentResult = outcome.getIntent();
 
         List<ItemCandidate> candidates = matcherService.match(intentResult, session);
         if (candidates.isEmpty()) {
             log.debug("[M07] No candidate after matching, callId={}, intentCode={}",
                     callId, intentResult.getIntentCode());
-            metricsService.recordTriggerFailure(callId, session, intentResult.getIntentCode(),
-                    intentResult.getIntentName(), ReasonCodeConstants.INTENT_NOT_MAPPED,
-                    FilterStageConstants.INTENT_MAPPING, configCache.getCurrentVersion());
+            publishFailed(callId, session, intentResult.getIntentCode(), intentResult.getIntentName(),
+                    ReasonCodeConstants.INTENT_NOT_MAPPED, FilterStageConstants.INTENT_MAPPING);
             return;
         }
 
         for (ItemCandidate candidate : candidates) {
-            if (tryBuildAndPush(callId, session, intentResult, candidate, candidates.size())) {
+            if (tryBuildAndPublish(callId, session, intentResult, candidate, candidates.size())) {
                 return;
             }
         }
-        log.warn("[M09] No directive pushed after trying all candidates, callId={}, intentCode={}",
+        log.warn("[M09] No directive prepared after trying all candidates, callId={}, intentCode={}",
                 callId, intentResult.getIntentCode());
     }
 
-    private boolean tryBuildAndPush(String callId, CallSession session,
-                                    IntentResult intentResult, ItemCandidate candidate, int candidateCount) {
+    private boolean tryBuildAndPublish(String callId, CallSession session,
+                                       IntentResult intentResult, ItemCandidate candidate, int candidateCount) {
         try {
             BuildContext context = BuildContext.builder()
                     .callId(callId)
                     .operatorId(session.getOperatorId())
                     .configVersion(configCache.getCurrentVersion())
-                    .item(candidate.getConfig())
-                    .paramContext(buildParamContext(session))
+                    .action(candidate.getConfig())
                     .build();
             DirectiveDTO directive = directiveBuilderService.build(context, intentResult);
-            boolean pushed = pushService.pushDirective(directive);
-            if (pushed) {
-                metricsService.recordTriggerSuccess(directive, session, candidate, candidateCount);
-            } else {
-                metricsService.recordTriggerFailure(callId, session, intentResult.getIntentCode(),
-                        intentResult.getIntentName(), ReasonCodeConstants.PUSH_FAILED,
-                        FilterStageConstants.PUSH, configCache.getCurrentVersion());
-            }
-            return pushed;
+            eventPublisher.publishEvent(new DirectivePreparedEvent(directive, session, candidate, candidateCount));
+            return true;
         } catch (RuntimeException e) {
-            log.warn("[M09] Build or push directive failed, callId={}, itemId={}",
-                    callId, candidate == null ? null : candidate.getItemId(), e);
-            recordBuildFailure(callId, session, intentResult, e);
+            log.warn("[M09] Build directive failed, callId={}, actionId={}",
+                    callId, candidate == null ? null : candidate.getActionId(), e);
+            publishBuildFailure(callId, session, intentResult, e);
             return false;
         }
     }
 
-    private void recordBuildFailure(String callId, CallSession session, IntentResult intentResult, RuntimeException e) {
+    private void publishBuildFailure(String callId, CallSession session, IntentResult intentResult, RuntimeException e) {
         if (e instanceof UrlValidationException) {
-            metricsService.recordTriggerFailure(callId, session, intentResult.getIntentCode(),
-                    intentResult.getIntentName(), ReasonCodeConstants.URL_NOT_ALLOWED,
-                    FilterStageConstants.URL_VALIDATION, configCache.getCurrentVersion());
+            publishFailed(callId, session, intentResult.getIntentCode(), intentResult.getIntentName(),
+                    ReasonCodeConstants.URL_NOT_ALLOWED, FilterStageConstants.URL_VALIDATION);
         } else if (e instanceof DirectiveBuildException) {
-            metricsService.recordTriggerFailure(callId, session, intentResult.getIntentCode(),
-                    intentResult.getIntentName(), ReasonCodeConstants.PARAM_MISSING,
-                    FilterStageConstants.PARAM_RESOLVE, configCache.getCurrentVersion());
+            publishFailed(callId, session, intentResult.getIntentCode(), intentResult.getIntentName(),
+                    ReasonCodeConstants.PARAM_MISSING, FilterStageConstants.PARAM_RESOLVE);
         } else {
-            metricsService.recordTriggerFailure(callId, session, intentResult.getIntentCode(),
-                    intentResult.getIntentName(), ReasonCodeConstants.PUSH_FAILED,
-                    FilterStageConstants.PUSH, configCache.getCurrentVersion());
+            // 未明确分类的构建期异常，归入 DIRECTIVE_BUILD_ERROR；
+            // 注意：此处尚未触发推送，因此不应误报为 PUSH_FAILED
+            publishFailed(callId, session, intentResult.getIntentCode(), intentResult.getIntentName(),
+                    ReasonCodeConstants.DIRECTIVE_BUILD_ERROR, FilterStageConstants.DIRECTIVE_BUILD);
         }
     }
 
-    private static ParamContext buildParamContext(CallSession session) {
-        Map<String, Object> sessionData = new HashMap<>();
-        sessionData.put("customer.customerId", session.getCustomerId());
-        sessionData.put("customer.customerType", session.getCustomerType());
-        sessionData.put("customerId", session.getCustomerId());
-        sessionData.put("customerType", session.getCustomerType());
-
-        Map<String, Object> callMetaData = new HashMap<>();
-        callMetaData.put("callId", session.getCallId());
-        callMetaData.put("operatorId", session.getOperatorId());
-
-        return ParamContext.builder()
-                .sessionData(sessionData)
-                .callMetaData(callMetaData)
+    private void publishFailed(String callId, CallSession session, String intentCode, String intentName,
+                               String reasonCode, String filterStage) {
+        DirectiveFailedEvent event = DirectiveFailedEvent.builder()
+                .callId(callId)
+                .session(session)
+                .intentCode(intentCode)
+                .intentName(intentName)
+                .reasonCode(reasonCode)
+                .filterStage(filterStage)
+                .configVersion(configCache.getCurrentVersion())
                 .build();
+        eventPublisher.publishEvent(event);
     }
 }

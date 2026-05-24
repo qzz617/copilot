@@ -7,16 +7,14 @@ import com.cmbchina.cs.assitsvc.infra.feign.AiIntentFeignClient;
 import com.cmbchina.cs.assitsvc.infra.feign.dto.AiDialogMessage;
 import com.cmbchina.cs.assitsvc.infra.feign.dto.IntentRecognitionRequest;
 import com.cmbchina.cs.assitsvc.infra.feign.dto.IntentRecognitionResponse;
+import com.cmbchina.cs.assitsvc.infra.metrics.ReasonCodeConstants;
 import feign.FeignException;
+import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
-import redis.clients.jedis.Jedis;
-import redis.clients.jedis.JedisPool;
-import redis.clients.jedis.exceptions.JedisException;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -24,39 +22,32 @@ import java.util.UUID;
 
 /**
  * AI 意图识别服务实现。
+ *
+ * <p>单通话调用频次的保护由上游 {@link com.cmbchina.cs.assitsvc.asr.SentenceMerger}
+ * 的固定窗口（默认 5s）天然限制；服务级保护由 Resilience4j 熔断器（{@code aiIntentClient}）承担。
+ * 因此本类不再做"单通话最大 AI 调用次数"的应用层计数。
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class IntentRecognitionServiceImpl implements IntentRecognitionService {
 
-    private static final String AI_COUNT_KEY_PREFIX = "copilot:ai_count:";
-    private static final int AI_COUNT_TTL_SECONDS = 2 * 3600;
-
     private final AiIntentFeignClient feignClient;
     private final DialogHistoryManager historyManager;
     private final IntentTreeLoader treeLoader;
     private final ExecutedStepsManager stepsManager;
-    private final JedisPool jedisPool;
-
-    @Value("${copilot.call-limits.max-ai-calls:50}")
-    private int maxAiCalls;
 
     @Override
     @CircuitBreaker(name = "aiIntentClient", fallbackMethod = "fallback")
-    public IntentResult recognize(String callId) {
+    public IntentRecognitionOutcome recognize(String callId) {
         if (!StringUtils.hasText(callId)) {
             throw new IllegalArgumentException("callId must not be null or empty");
-        }
-        if (!allowAiCall(callId)) {
-            log.warn("[M06] AI call limit exceeded, callId={}, maxAiCalls={}", callId, maxAiCalls);
-            return null;
         }
 
         List<AiDialogMessage> customerOnly = customerOnlyHistory(callId);
         if (customerOnly.isEmpty()) {
             log.debug("[M06] No customer history for AI recognition, callId={}", callId);
-            return null;
+            return IntentRecognitionOutcome.failure(ReasonCodeConstants.NO_CUSTOMER_HISTORY);
         }
 
         IntentRecognitionRequest request = IntentRecognitionRequest.builder()
@@ -82,11 +73,15 @@ public class IntentRecognitionServiceImpl implements IntentRecognitionService {
      *
      * @param callId 通话 ID
      * @param t      异常
-     * @return null
+     * @return 失败结果包装
      */
-    public IntentResult fallback(String callId, Throwable t) {
-        log.warn("[M06] AI circuit breaker fallback, callId={}", callId, t);
-        return null;
+    public IntentRecognitionOutcome fallback(String callId, Throwable t) {
+        if (t instanceof CallNotPermittedException) {
+            log.warn("[M06] AI circuit breaker open, callId={}", callId);
+            return IntentRecognitionOutcome.failure(ReasonCodeConstants.AI_CIRCUIT_BREAKER_OPEN);
+        }
+        log.warn("[M06] AI call fallback by network/timeout failure, callId={}", callId, t);
+        return IntentRecognitionOutcome.failure(ReasonCodeConstants.AI_NETWORK_FAIL);
     }
 
     private List<AiDialogMessage> customerOnlyHistory(String callId) {
@@ -101,49 +96,36 @@ public class IntentRecognitionServiceImpl implements IntentRecognitionService {
     }
 
     private static AiDialogMessage toAiMessage(DialogMessage message) {
+        // customerOnlyHistory 已过滤为 CUSTOMER 句子，此处 role 固定为 "user"
         return AiDialogMessage.builder()
                 .id(message.getId())
-                .role(message.getRole())
+                .role("user")
                 .content(message.getContent())
                 .contentType(message.getContentType())
                 .createTime(message.getCreateTime())
                 .build();
     }
 
-    private IntentResult parseResponse(String callId, String requestId, IntentRecognitionResponse response) {
+    private IntentRecognitionOutcome parseResponse(String callId, String requestId, IntentRecognitionResponse response) {
         if (response == null) {
             log.warn("[M06] AI response is null, callId={}, requestId={}", callId, requestId);
-            return null;
+            return IntentRecognitionOutcome.failure(ReasonCodeConstants.AI_BUSINESS_FAIL);
         }
-        if (!"1000".equals(response.getRespCode())) {
+        if (!IntentRecognitionResponse.RESP_CODE_SUCCESS.equals(response.getRespCode())) {
             log.warn("[M06] AI response code not success, callId={}, requestId={}, respCode={}, respMsg={}",
                     callId, requestId, response.getRespCode(), response.getRespMsg());
-            return null;
+            return IntentRecognitionOutcome.failure(ReasonCodeConstants.AI_BUSINESS_FAIL);
         }
         IntentRecognitionResponse.DataNode data = response.getData();
         if (data == null || !StringUtils.hasText(data.getIntentCode())) {
             log.debug("[M06] AI returned empty intent, callId={}, requestId={}", callId, requestId);
-            return null;
+            return IntentRecognitionOutcome.failure(ReasonCodeConstants.INTENT_EMPTY);
         }
 
-        return IntentResult.builder()
+        return IntentRecognitionOutcome.success(IntentResult.builder()
                 .intentCode(data.getIntentCode())
                 .intentName(data.getIntentName())
-                .build();
-    }
-
-    private boolean allowAiCall(String callId) {
-        String key = AI_COUNT_KEY_PREFIX + callId;
-        try (Jedis jedis = jedisPool.getResource()) {
-            Long count = jedis.incr(key);
-            if (count != null && count == 1L) {
-                jedis.expire(key, AI_COUNT_TTL_SECONDS);
-            }
-            return count == null || count <= maxAiCalls;
-        } catch (JedisException e) {
-            log.warn("[M06] Redis AI call count failed, callId={}", callId, e);
-            return true;
-        }
+                .build());
     }
 
     private static String generateRequestId() {

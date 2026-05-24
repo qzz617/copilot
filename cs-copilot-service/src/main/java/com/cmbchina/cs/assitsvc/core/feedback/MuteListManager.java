@@ -2,11 +2,13 @@ package com.cmbchina.cs.assitsvc.core.feedback;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataAccessException;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
-import redis.clients.jedis.Jedis;
-import redis.clients.jedis.JedisPool;
-import redis.clients.jedis.exceptions.JedisException;
+
+import java.util.Collections;
 
 /**
  * 本通话静默列表管理器。
@@ -16,54 +18,75 @@ import redis.clients.jedis.exceptions.JedisException;
 @RequiredArgsConstructor
 public class MuteListManager {
 
-    private static final String INTENT_KEY_PREFIX = "copilot:mute:intent:";
-    private static final String ITEM_KEY_PREFIX = "copilot:mute:item:";
+    private static final String INTENT_KEY_PREFIX = "copilot:mute:{";
+    private static final String INTENT_KEY_SUFFIX = "}:intent";
+    private static final String ACTION_KEY_PREFIX = "copilot:mute:{";
+    private static final String ACTION_KEY_SUFFIX = "}:action";
     private static final int CALL_MUTE_TTL_SECONDS = 2 * 3600;
 
-    private final JedisPool jedisPool;
+    /**
+     * Lua 脚本：SADD + EXPIRE 原子化。
+     * 避免 SADD 后进程崩溃导致 key 无 TTL 永久泄漏。
+     * <pre>
+     * KEYS[1] = set key
+     * ARGV[1] = member
+     * ARGV[2] = TTL（秒）
+     * </pre>
+     */
+    private static final DefaultRedisScript<Long> ADD_TO_SET_SCRIPT = new DefaultRedisScript<>(
+            "redis.call('SADD', KEYS[1], ARGV[1]); "
+                    + "redis.call('EXPIRE', KEYS[1], ARGV[2]); "
+                    + "return 1;",
+            Long.class);
+
+    private final StringRedisTemplate redisTemplate;
 
     public void muteIntent(String callId, String intentCode, int ttlSeconds) {
-        addToSet(INTENT_KEY_PREFIX + callId, intentCode, ttlSeconds);
+        addToSet(intentKey(callId), intentCode, ttlSeconds);
     }
 
     public void muteIntentForCall(String callId, String intentCode) {
         muteIntent(callId, intentCode, CALL_MUTE_TTL_SECONDS);
     }
 
-    public void muteItemForCall(String callId, Long itemId) {
-        if (itemId != null) {
-            addToSet(ITEM_KEY_PREFIX + callId, String.valueOf(itemId), CALL_MUTE_TTL_SECONDS);
+    public void muteActionForCall(String callId, String actionId) {
+        if (StringUtils.hasText(actionId)) {
+            addToSet(actionKey(callId), actionId, CALL_MUTE_TTL_SECONDS);
         }
     }
 
     public boolean isIntentMuted(String callId, String intentCode) {
-        return isMember(INTENT_KEY_PREFIX + callId, intentCode);
+        return isMember(intentKey(callId), intentCode);
     }
 
-    public boolean isItemMuted(String callId, Long itemId) {
-        return itemId != null && isMember(ITEM_KEY_PREFIX + callId, String.valueOf(itemId));
+    public boolean isActionMuted(String callId, String actionId) {
+        return StringUtils.hasText(actionId) && isMember(actionKey(callId), actionId);
     }
 
+    /**
+     * 通话结束时调用。
+     *
+     * <p><b>行内规范</b>：Redis 不使用 delete 等阻塞命令，临时数据完全依赖 TTL 自动过期清理。
+     * 本方法仅保留日志和方法签名，作为通话生命周期事件钩子。
+     */
     public void cleanup(String callId) {
         if (!StringUtils.hasText(callId)) {
+            log.debug("[M11] Cleanup skipped on blank callId");
             return;
         }
-        try (Jedis jedis = jedisPool.getResource()) {
-            jedis.del(INTENT_KEY_PREFIX + callId);
-            jedis.del(ITEM_KEY_PREFIX + callId);
-        } catch (JedisException e) {
-            log.warn("[M11] Redis cleanup mute list failed, callId={}", callId, e);
-        }
+        log.debug("[M11] Cleanup invoked, relying on TTL expiration, callId={}", callId);
     }
 
     private void addToSet(String key, String value, int ttlSeconds) {
         if (!StringUtils.hasText(value)) {
             return;
         }
-        try (Jedis jedis = jedisPool.getResource()) {
-            jedis.sadd(key, value);
-            jedis.expire(key, ttlSeconds);
-        } catch (JedisException e) {
+        try {
+            redisTemplate.execute(ADD_TO_SET_SCRIPT,
+                    Collections.singletonList(key),
+                    value,
+                    String.valueOf(ttlSeconds));
+        } catch (DataAccessException e) {
             log.warn("[M11] Redis mute failed, key={}, value={}", key, value, e);
         }
     }
@@ -72,11 +95,19 @@ public class MuteListManager {
         if (!StringUtils.hasText(value)) {
             return false;
         }
-        try (Jedis jedis = jedisPool.getResource()) {
-            return jedis.sismember(key, value);
-        } catch (JedisException e) {
+        try {
+            return Boolean.TRUE.equals(redisTemplate.opsForSet().isMember(key, value));
+        } catch (DataAccessException e) {
             log.warn("[M11] Redis mute check failed, key={}, value={}", key, value, e);
             return false;
         }
+    }
+
+    private static String intentKey(String callId) {
+        return INTENT_KEY_PREFIX + callId + INTENT_KEY_SUFFIX;
+    }
+
+    private static String actionKey(String callId) {
+        return ACTION_KEY_PREFIX + callId + ACTION_KEY_SUFFIX;
     }
 }

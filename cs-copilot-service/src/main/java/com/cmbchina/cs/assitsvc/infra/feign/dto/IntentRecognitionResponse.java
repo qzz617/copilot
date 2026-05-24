@@ -14,6 +14,9 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class IntentRecognitionResponse {
 
+    /** 成功响应码。 */
+    public static final String RESP_CODE_SUCCESS = "1000";
+
     /** 响应码，1000 表示成功。 */
     private String respCode;
 

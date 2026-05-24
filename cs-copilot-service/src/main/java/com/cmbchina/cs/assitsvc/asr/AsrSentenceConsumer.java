@@ -33,9 +33,9 @@ public class AsrSentenceConsumer {
      */
     @KafkaListener(topics = "${copilot.asr.topic}", concurrency = "${copilot.asr.concurrency:4}")
     public void consume(ConsumerRecord<String, String> record, Acknowledgment ack) {
-        String payload = record == null ? null : record.value();
+        String payload = record.value();
         try {
-            process(payload);
+            process(payload, record.key(), record.partition(), record.offset());
         } catch (Exception e) {
             log.error("[M01] Process ASR event failed, payload={}", payload, e);
         } finally {
@@ -43,10 +43,16 @@ public class AsrSentenceConsumer {
         }
     }
 
-    void process(String payload) {
+    void process(String payload, String recordKey, int partition, long offset) {
         AsrSentenceEvent event = parser.parse(payload);
         if (!basicValid(event)) {
             log.warn("[M01] Invalid ASR event ignored, event={}", event);
+            return;
+        }
+
+        // routeValid 提前：所有角色（CUSTOMER/AGENT）都必须满足 Kafka key 路由约束，
+        // 否则路由错误的 AGENT 句子会因不进入触发链路而被掩盖
+        if (!routeValid(event, recordKey, partition, offset)) {
             return;
         }
 
@@ -86,6 +92,18 @@ public class AsrSentenceConsumer {
         }
 
         return confidence >= props.getAsrConfidenceThreshold();
+    }
+
+    private boolean routeValid(AsrSentenceEvent event, String recordKey, int partition, long offset) {
+        if (!props.isRequireCallIdKey()) {
+            return true;
+        }
+        if (event.getCallId().equals(recordKey)) {
+            return true;
+        }
+        log.warn("[M01] ASR event Kafka key mismatch, sentence dropped, callId={}, recordKey={}, partition={}, offset={}",
+                event.getCallId(), recordKey, partition, offset);
+        return false;
     }
 
     private static void acknowledge(Acknowledgment ack) {

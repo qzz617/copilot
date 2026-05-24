@@ -3,9 +3,8 @@ package com.cmbchina.cs.assitsvc.core.intent;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONException;
 import com.cmbchina.cs.assitsvc.domain.IntentTreeNode;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StreamUtils;
 import org.springframework.util.StringUtils;
@@ -22,17 +21,12 @@ import java.util.List;
  */
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class IntentTreeLoaderImpl implements IntentTreeLoader {
 
-    @Value("${copilot.intent-tree.file}")
-    private Resource intentTreeFile;
+    private final IntentTreeProperties props;
 
-    @Value("${copilot.intent-tree.version}")
-    private String version;
-
-    private volatile IntentTreeNode cachedTree;
-    private volatile int nodeCount;
-    private volatile Instant lastLoadTime;
+    private volatile IntentTreeSnapshot snapshot = new IntentTreeSnapshot(null, 0, null);
 
     /**
      * 启动时加载 classpath 中的意图树配置。
@@ -48,36 +42,34 @@ public class IntentTreeLoaderImpl implements IntentTreeLoader {
         int newNodeCount = countNodes(newTree);
         Instant newLoadTime = Instant.now();
 
-        this.cachedTree = newTree;
-        this.nodeCount = newNodeCount;
-        this.lastLoadTime = newLoadTime;
+        this.snapshot = new IntentTreeSnapshot(newTree, newNodeCount, newLoadTime);
 
         log.info("[M05] Intent tree loaded, version={}, nodeCount={}, loadTime={}",
-                version, newNodeCount, newLoadTime);
+                props.getVersion(), newNodeCount, newLoadTime);
     }
 
     @Override
     public IntentTreeNode getTree() {
-        return cachedTree;
+        return snapshot.getTree();
     }
 
     @Override
     public String getVersion() {
-        return version;
+        return props.getVersion();
     }
 
     @Override
     public int getNodeCount() {
-        return nodeCount;
+        return snapshot.getNodeCount();
     }
 
     @Override
     public Instant getLastLoadTime() {
-        return lastLoadTime;
+        return snapshot.getLastLoadTime();
     }
 
     private IntentTreeNode loadTree() {
-        try (InputStream inputStream = intentTreeFile.getInputStream()) {
+        try (InputStream inputStream = props.getFile().getInputStream()) {
             String content = StreamUtils.copyToString(inputStream, StandardCharsets.UTF_8);
             IntentTreeNode root = JSON.parseObject(content, IntentTreeNode.class);
             validateRoot(root);
@@ -116,5 +108,29 @@ public class IntentTreeLoaderImpl implements IntentTreeLoader {
             count += countNodes(child);
         }
         return count;
+    }
+
+    private static class IntentTreeSnapshot {
+        private final IntentTreeNode tree;
+        private final int nodeCount;
+        private final Instant lastLoadTime;
+
+        private IntentTreeSnapshot(IntentTreeNode tree, int nodeCount, Instant lastLoadTime) {
+            this.tree = tree;
+            this.nodeCount = nodeCount;
+            this.lastLoadTime = lastLoadTime;
+        }
+
+        private IntentTreeNode getTree() {
+            return tree;
+        }
+
+        private int getNodeCount() {
+            return nodeCount;
+        }
+
+        private Instant getLastLoadTime() {
+            return lastLoadTime;
+        }
     }
 }

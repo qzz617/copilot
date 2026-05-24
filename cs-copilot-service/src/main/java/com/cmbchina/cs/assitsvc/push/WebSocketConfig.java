@@ -1,9 +1,12 @@
 package com.cmbchina.cs.assitsvc.push;
 
+import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.messaging.simp.config.MessageBrokerRegistry;
+import org.springframework.util.CollectionUtils;
 import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBroker;
 import org.springframework.web.socket.config.annotation.StompEndpointRegistry;
+import org.springframework.web.socket.config.annotation.StompWebSocketEndpointRegistration;
 import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerConfigurer;
 
 /**
@@ -11,7 +14,10 @@ import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerCo
  */
 @Configuration
 @EnableWebSocketMessageBroker
+@RequiredArgsConstructor
 public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
+
+    private final WebSocketProperties properties;
 
     @Override
     public void configureMessageBroker(MessageBrokerRegistry registry) {
@@ -22,8 +28,11 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
-        registry.addEndpoint("/copilot/ws")
-                .setAllowedOriginPatterns("*")
-                .withSockJS();
+        StompWebSocketEndpointRegistration registration = registry.addEndpoint("/copilot/ws")
+                .setHandshakeHandler(new OperatorPrincipalHandshakeHandler(properties));
+        if (!CollectionUtils.isEmpty(properties.getAllowedOriginPatterns())) {
+            registration.setAllowedOriginPatterns(properties.getAllowedOriginPatterns().toArray(new String[0]));
+        }
+        registration.withSockJS();
     }
 }

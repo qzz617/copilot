@@ -11,11 +11,11 @@
 > 1. **M01 顺序修订（P0-7）**：先存历史再做触发判断，落实"全量保存"语义
 > 2. **callSession 必校验（P0-8）**：缺失时 fail closed，不再用空 operatorId 推荐
 > 3. **反馈接口指令校验（P0-6）**：directive_id 唯一约束 + 服务端校验 + 幂等控制
-> 4. **Cookie 受控能力（P0-4）**：增加 Cookie 名白名单 + Cookie-域名绑定白名单
+> 4. **业务参数透传**：纯 action 仅允许 CUST_NO / CUST_ID_NO / MOBPHN1 / ACCOUNT_NO，由前端按业务类型取值
 > 5. **URL 安全增强（P0-5）**：https 协议、生产禁 UAT、同名参数冲突策略
 > 6. **熔断保护（P1-5）**：AI Feign 增加熔断（不做限流/Bulkhead）
 > 7. **基础灰度白名单（P1-9）**：operatorId 白名单（不做完整灰度框架）
-> 8. **CLOB 发布前基础校验（P1-8）**：必填字段、URL 白名单、组合合法性（不是沙箱）
+> 8. **Copilot 配置发布前基础校验（P1-8）**：action/mapping/item 一致性、URL 白名单、组合合法性（不是沙箱）
 > 9. **trigger_log 字段扩展（P1-16）**：增加 result_status / reason_code / filter_stage 等
 > 10. **意图树热加载（P1-7）**：新增 /admin/intent-tree/reload 接口
 > 11. **多 Pod 配置一致性（P1-17）**：30 秒轮询版本号兜底
@@ -92,12 +92,12 @@
 | 4 | callId-operatorId 绑定 | 来电弹屏时建立绑定；**缺失时 fail closed 不推荐**（P0-8） |
 | 5 | 意图树（配置文件） | Spring 配置文件加载，**支持 Admin 接口热加载**（P1-7） |
 | 6 | AI 接口对接 | Feign 调用，**调用前过滤只传客户消息**；**支持熔断**（P1-5） |
-| 7 | 意图-功能映射匹配 | 单 intentCode → 多 itemId 候选 |
-| 8 | 参数解析 | session/callMeta + **Cookie 受控占位符**（白名单 + 域名绑定，P0-4） |
-| 9 | 跳转指令构建与推送 | URL 含占位符 + **多重安全校验**（P0-5）+ WebSocket 推送 |
-| 10 | 反馈采集 | 4 种反馈 + **服务端指令校验 + 幂等约束**（P0-6） |
-| 11 | 前端 SDK | 浮窗 + 推荐卡片 + 5 种打开方式 + Cookie 替换 + **权限 API fail closed**（P1-20） |
-| 12 | 业务监控埋点 | 触发日志 + 反馈日志落库（**仅落库，不做看板**） |
+| 7 | 意图-功能映射匹配 | 单 intentCode → 多 actionId 候选 |
+| 8 | 参数配置透传 | 纯 action 透传 `param_config_json`，后端不解析客户参数 |
+| 9 | 跳转指令构建与推送 | 构建基础 URL/route + `action.paramConfigs` + WebSocket 推送 |
+| 10 | 反馈采集 | 4 种反馈先记录返回；异步做指令校验、幂等生效和静默/已执行步骤更新（P0-6） |
+| 11 | 前端 SDK | 浮窗 + 推荐卡片 + 5 种打开方式 + 按 `paramType` 取值拼接 + **权限 API fail closed**（P1-20） |
+| 12 | 业务监控埋点 | MVP 阶段触发日志打应用日志、反馈结果写 ES（**不做看板**） |
 | 13 | **配置发布基础校验**（DD-V1.2 新增 P1-8） | 一键发布前校验必填字段、URL 白名单、组合合法性 |
 
 ### 2.2 本期不做（明确清单）
@@ -115,8 +115,8 @@
 | 灰度发布机制（完整） | 仅做最简坐席白名单 | F07 |
 | 跨环境配置同步 | 后续独立设计 | F08 |
 | 配置沙箱（含 AI 评估） | 仅做基础校验 | F09 |
-| 业务效果看板 | 仅落库 | F10 |
-| 配置质量看板 | 仅落库 | F11 |
+| 业务效果看板 | 仅采集日志/ES 数据 | F10 |
+| 配置质量看板 | 仅采集日志/ES 数据 | F11 |
 | 应用日志、接口监控基础设施 | 行内已有 | - |
 | 服务端权限校验 | 前端控制 | F13 |
 | URL 一次性 token 改造 | 涉及目标系统 | **F14（DD-V1.2 新增）** |
@@ -131,8 +131,9 @@
 | 对话历史含敏感原文 | Redis 中可能含身份证/手机号/卡号等 | Redis TTL 1 小时自动清理；不外传 | F05 数据脱敏框架 |
 | AI 调用未脱敏 | 客户原文传给行内大模型 | 调用行内大模型，不外传 | F05 数据脱敏框架 |
 | 服务端不校验业务权限 | 前端权限被绕过的潜在风险 | 前端基于工作台已有权限过滤 | F13 服务端权限校验 |
-| Cookie 占位符若误配高敏字段 | 登录态可能进入 URL query 被日志记录 | 白名单严格限制可用 Cookie；建议运营仅配置低敏业务参数 | F14 一次性 token 跳转 |
+| 前端业务参数取值规则不一致 | 不同功能打开时参数缺失或取值错误 | 后端只允许 4 个业务参数类型，前端统一维护 `paramType -> 取值来源` 映射 | F14 一次性 token 跳转 |
 | Pod 重启 timer 丢失 | 极少量推荐漏触发 | 滚动发布保证一个 Pod 可用；Kafka 重平衡有延迟容忍 | F15 Redis 持久化 timer |
+| 通话结束不立即删除 Redis 临时数据 | unbind 后 TTL 到期前数据仍占用 Redis 内存 | M02 写入 cleanup marker 让已排队防抖任务失效；其他通话级状态依赖 TTL 自动过期 | 若行内允许，后续评估 UNLINK/lazy delete 或独立清理机制 |
 | 配置发布基础校验非完整沙箱 | 发布后才能发现 AI 识别准确率问题 | 基础校验阻断明显错误（必填、URL、组合）；运营可手动测试 | F09 完整配置沙箱 |
 
 > **声明**：以上简化项已经业务方确认可接受。上线前需评估实际数据敏感度并取得合规审批。
@@ -149,7 +150,7 @@
 安全分层：
 
 ```
-后端：基础校验（callSession 存在、itemId 启用、URL 白名单、Cookie 白名单）→ 不推不该推的推荐
+后端：基础校验（callSession 存在、action 启用、关联菜单项可用、URL 白名单、业务 paramType 白名单）→ 不推不该推的推荐
 前端：基于工作台权限二次过滤 → 不展示无权限的功能
 坐席：确认后才打开
 日志：全链路可追溯（trigger_log 含 result_status / reason_code）
@@ -162,16 +163,18 @@
 ```
 1. 复用为先
    - 复用存量 cs_menu_* 表
-   - 复用存量 cs_menu_version 发布机制（小幅扩展）
+   - 复用存量菜单打开能力，但不把 Copilot 配置写入 cs_menu_version.config_data
    - 复用工作台 WebSocket 基础设施
    - 复用前端权限体系
    - 复用行内应用日志和接口监控
 
-2. 配置文件优于数据库
-   - 意图树放配置文件，不存表
+2. Copilot 配置独立于菜单发布
+   - Copilot 动作、意图映射、配置版本独立建表
+   - cs_menu_version.config_data 继续作为菜单发布快照，不承载 copilotIndex
+   - 关联 menu_item_id 时只做可用性和一致性校验，运行时以菜单项配置为准
 
 3. 数据库表精简
-   - 仅 4 张新增表
+   - 新增 Copilot 配置表、版本表、日志表
    - enabled 字段替代复杂状态机
 
 4. 接口契约稳定
@@ -185,13 +188,13 @@
 
 6. 服务端做基础校验，不做业务权限校验（DD-V1.2 调整）
    - 前端基于工作台已有权限体系判断业务权限（仍由前端控制）
-   - 后端做基础校验：callSession 存在、itemId 启用、URL/Cookie 白名单
+   - 后端做基础校验：callSession 存在、action 启用、关联菜单项可用、URL 白名单、业务 paramType 白名单
    - 后端不做"该坐席能否访问此功能"的业务权限判断
    - 简化后端，降低耦合，但保留必要的安全底线
 
-7. 服务端不拼前端登录态参数（DD-V1.1）
-   - 服务端 URL 用占位符 ${COOKIE.xxx} 表示
-   - 前端拿到指令后从 cookie 取值替换
+7. 服务端不拼前端登录态参数
+   - 服务端只透传业务 `paramType` 和目标侧 `paramKey`
+   - 前端拿到指令后按业务参数类型从 Cookie / 工作台上下文取值
 ```
 
 ---
@@ -209,11 +212,11 @@
 | M05 | 意图树加载器 | 后端 | 1.5 | + 热加载接口（P1-7）|
 | M06 | AI Feign Client + 过滤 + 熔断 | 后端 | 4 | + 熔断（P1-5），+ AI 计数（P1-4）|
 | M07 | 意图-功能匹配引擎 | 后端 | 4 | + 灰度白名单（P1-9）|
-| M08 | 参数解析器 | 后端 | 3 | Cookie 白名单（P0-4） |
-| M09 | 跳转指令构建器 | 后端 | 3 | + URL 多重校验（P0-5）|
+| M08 | 参数配置透传 | 后端 | 3 | 仅允许 4 个业务参数类型 |
+| M09 | 跳转指令构建器 | 后端 | 3 | + 基础目标构建 + paramConfigs 透传 |
 | M10 | WebSocket 推送 | 后端 | 2 | - |
 | M11 | 反馈接口 | 后端 | 3.5 | + 指令校验 + 幂等（P0-6）|
-| M12 | CLOB 生成扩展 + 发布前校验 | 后端 | 4.5 | + 发布前基础校验（P1-8）|
+| M12 | Copilot 配置发布 + 发布前校验 | 后端 | 4.5 | + action/mapping/item 一致性校验（P1-8）|
 | M13 | Copilot 配置后台 | 后端+前端 | 6 | - |
 | M14 | 前端 SDK | 前端 | 9 | + 权限 fail closed（P1-20），+ 卡片频控（P2-12）|
 | M15 | 五种打开方式 | 前端 | 4 | - |
@@ -247,6 +250,8 @@
 | F13 | 服务端权限校验 | P3 |
 | **F14** | **URL 一次性 token 跳转**（DD-V1.2 新增） | **P2** |
 | **F15** | **Pod 重启 timer 持久化**（DD-V1.2 新增） | **P3** |
+| F16 | 菜单变更自动触发 Copilot 配置发布 | P3 |
+| F17 | sentence merger 独立 Redis 实例 / Redisson 延迟队列改造 | P3 |
 
 ---
 
@@ -276,13 +281,13 @@ graph TB
             M04[M04 callId 绑定]
             M06[M06 AI Feign Client<br/>调用前过滤]
             M07[M07 意图-功能匹配]
-            M08[M08 参数解析<br/>含 Cookie 占位符]
+            M08[M08 参数配置透传<br/>paramConfigs]
             M09[M09 指令构建器]
             M16[M16 监控埋点]
         end
         subgraph 配置["配置层"]
             M05[M05 意图树<br/>Spring 配置文件]
-            CACHE[CLOB 内存缓存]
+            CACHE[CopilotConfigSnapshot<br/>本地配置快照]
         end
         subgraph 接口["接口层"]
             M11[M11 反馈接口]
@@ -297,7 +302,7 @@ graph TB
     end
 
     subgraph Frontend["工作台前端"]
-        SDK[M14 前端 SDK<br/>权限过滤+Cookie 替换]
+        SDK[M14 前端 SDK<br/>权限过滤+参数取值]
         OPEN[M15 五种打开方式]
     end
 
@@ -350,7 +355,7 @@ graph LR
 设计要点：
 
 - Copilot Service 无状态，支持水平扩展
-- 内存缓存 CLOB，通过 Admin 接口触发刷新
+- 内存缓存 CopilotConfigSnapshot，通过 Admin 接口触发刷新，并通过版本轮询兜底
 - ASR 消息按 `callId` 哈希分区，保证同通话路由到同一 Pod（防抖 timer 一致性）
 - Redis 维护通话级状态（对话历史、callSession、静默列表）
 
@@ -367,13 +372,13 @@ graph LR
 | M03 对话历史管理 | **全量保存** 客户+坐席 | ASR 事件 | List<DialogMessage> |
 | M04 callId 绑定 | 通话级会话上下文 | CTI 弹屏事件 | CallSession |
 | M05 意图树加载器 | 启动时从配置文件加载 | Spring Resource | IntentTree 内存对象 |
-| M06 AI Feign Client | Feign 调用 + **调用前过滤** | history+intentTree | IntentResult |
-| M07 意图-功能匹配 | CLOB 反向索引查询 | intentCode | List<ItemCandidate> |
-| M08 参数解析器 | 上下文取值 + Cookie 占位符标记 | paramList + ctx | ResolvedParams |
-| M09 指令构建器 | URL 拼接（含占位符）+ actionType 派生 | candidate + params | DirectiveDTO |
+| M06 AI Feign Client | Feign 调用 + **调用前过滤** | history+intentTree | IntentRecognitionOutcome（含 IntentResult 或失败原因） |
+| M07 意图-功能匹配 | CopilotConfigSnapshot 反向索引查询 | intentCode | List<ItemCandidate> |
+| M08 参数配置透传 | 不读取客户值，透传 `param_config_json` | action.param_config_json | List<ItemParam> |
+| M09 指令构建器 | 基础目标 URL/route + actionType 派生 + paramConfigs | candidate + action | DirectiveDTO |
 | M10 WebSocket 推送 | 推送指令到前端 | DirectiveDTO | 前端 push |
-| M11 反馈接口 | 反馈采集 + 持久化 + 静默 | FeedbackDTO | DB |
-| M16 业务监控埋点 | 触发/反馈日志落库 | 业务事件 | DB |
+| M11 反馈接口 | 反馈采集先记录返回；异步生效静默/已执行步骤 | FeedbackDTO | DB + Redis |
+| M16 业务监控埋点 | 触发日志输出应用日志，反馈结果写 ES | 业务事件 | Log / ES |
 
 ### 6.2 前端模块职责矩阵
 
@@ -383,7 +388,7 @@ graph LR
 | M14-2 浮窗 UI | 展示推荐卡片、状态提示 |
 | M14-3 推荐卡片组件 | 展示意图、功能、确认按钮 |
 | M14-4 权限过滤 | **基于工作台已有权限体系，过滤无权功能不展示** |
-| M14-5 Cookie 占位符替换 | 把指令中 `${COOKIE.xxx}` 替换为实际 cookie 值 |
+| M14-5 参数取值与拼接 | 按 `paramType` 从 Cookie/工作台上下文取值，并按 `paramKey` 拼 URL 或组件 props |
 | M14-6 反馈上报 | 4 种反馈类型上报 |
 | M15 五种打开方式 | URL/路由/组件/iframe/新窗口 |
 
@@ -401,38 +406,38 @@ flowchart TD
     D -.防抖到期.-> E[加载历史 + 意图树]
     E --> F[**过滤** 只取客户消息]
     F --> G[Feign 调 AI]
-    G --> H[IntentResult]
-    H --> I[CLOB 反向索引]
+    G --> H[IntentRecognitionOutcome]
+    H -.success.-> I[CopilotConfigSnapshot 反向索引]
+    H -.failure.-> X[记录 trigger_log FAIL]
     I --> J[List ItemCandidate]
-    J --> K[评估 condition_rule + 静默列表]
+    J --> K[过滤禁用 action + 静默列表]
     K --> L[取最高优先级]
-    L --> M[参数解析<br/>session/callMeta + Cookie 占位符]
-    M --> N[拼接 URL<br/>含占位符]
-    N --> O[构建 DirectiveDTO]
-    O --> P[WebSocket 推送]
-    P --> Q[前端 SDK 接收]
-    Q --> R[**前端权限过滤**]
-    R -.有权限.-> S[展示推荐]
-    R -.无权限.-> X[静默丢弃]
+    L --> M[透传 action.paramConfigs<br/>不解析客户参数]
+    M --> N[构建 DirectiveDTO<br/>URL/route 保持基础目标]
+    N --> O[WebSocket 推送]
+    O --> P[前端 SDK 接收]
+    P --> Q[**前端权限过滤**]
+    Q -.有权限.-> S[展示推荐]
+    Q -.无权限.-> X[静默丢弃]
     S --> T[坐席点击打开]
-    T --> U[Cookie 占位符替换]
+    T --> U[按 paramType 前端取值并拼接]
     U --> V[执行 5 种打开方式]
     V --> W[反馈 ACCEPTED]
-    W --> Y[落库 + 业务埋点]
+    W --> Y[反馈先记录返回<br/>异步让反馈生效]
 ```
 
-### 7.2 配置数据流（CLOB 复用，方案 B）
+### 7.2 配置数据流（Copilot 独立配置）
 
 ```mermaid
 flowchart LR
     A[配置后台编辑] --> B[活表数据]
-    B --> C[运营点击一键发布]
-    C --> D[存量发布逻辑<br/>已扩展 M12]
-    D --> E[读存量表 + Copilot 扩展表]
-    E --> F[装配完整 CLOB]
-    F --> G[写 cs_menu_version]
+    B --> C[运营点击发布 Copilot 配置]
+    C --> D[Copilot 配置发布服务 M12]
+    D --> E[读 action + mapping + 可选菜单项]
+    E --> F[action/mapping/item 校验]
+    F --> G[写 cs_copilot_config_version]
     G --> H[Admin 触发 Copilot 刷新]
-    H --> I[内存 CLOB + 反向索引]
+    H --> I[内存 CopilotConfigSnapshot + 反向索引]
 ```
 
 ### 7.3 会话保存与过滤分开（DD-V1.1 关键设计）
@@ -666,10 +671,11 @@ stateDiagram-v2
 @Component
 public class SentenceMerger {
 
-    private final Map<String, ScheduledFuture<?>> debounceTimers = new ConcurrentHashMap<>();
-    private final Map<String, ScheduledFuture<?>> silenceTimers = new ConcurrentHashMap<>();
+    private static final String STATE_KEY_PREFIX = "copilot:{asr_merge}:state:";
+    private static final String DUE_QUEUE_KEY = "copilot:{asr_merge}:due";
+    private static final String CLEANED_ROUND_MARKER = "CLEANED";
 
-    @Autowired private ScheduledExecutorService scheduler;
+    @Autowired private StringRedisTemplate redisTemplate;
     @Autowired private IntentRecognitionTrigger trigger;
 
     public void handleSentence(AsrSentenceEvent event) {
@@ -677,18 +683,19 @@ public class SentenceMerger {
         SentenceContinuity continuity = detect(event.getContent());
         long debounceMs = mapDebounceMs(continuity);
 
-        cancelTimer(debounceTimers.remove(callId));
-        debounceTimers.put(callId, scheduler.schedule(
-            () -> trigger.fire(callId), debounceMs, TimeUnit.MILLISECONDS));
-
-        cancelTimer(silenceTimers.remove(callId));
-        silenceTimers.put(callId, scheduler.schedule(
-            () -> trigger.fire(callId), 2000, TimeUnit.MILLISECONDS));
+        String roundId = nextRoundId();
+        redisTemplate.opsForValue().set(
+            stateKey(callId), roundId, debounceMs + 10 * 60 * 1000L,
+            TimeUnit.MILLISECONDS);
+        redisTemplate.opsForZSet().add(DUE_QUEUE_KEY,
+            eventMember(callId, roundId, "DEBOUNCE"),
+            System.currentTimeMillis() + debounceMs);
     }
 
     public void cleanup(String callId) {
-        cancelTimer(debounceTimers.remove(callId));
-        cancelTimer(silenceTimers.remove(callId));
+        // 通话结束后写入标记，使已排队旧 roundId 的 claim 失败。
+        redisTemplate.opsForValue().set(
+            stateKey(callId), CLEANED_ROUND_MARKER, 10, TimeUnit.MINUTES);
     }
 }
 ```
@@ -704,6 +711,24 @@ MVP 方案：Kafka Topic 按 callId 哈希分区
 
 后续优化（待实现）：Redis 分布式锁 + 全局防抖 timer
 ```
+
+### 9.7 Redis Cluster 单 slot 路由（DD-V1.2 决策）
+
+M02 防抖状态使用统一 hash tag `{asr_merge}`，目的是让 `pollDueTasks` 中的 Lua claim 脚本能跨 `stateKey(callId)` 和 `DUE_QUEUE_KEY` 两个 key 执行（Redis Cluster 要求脚本中所有 key 同 slot）。
+
+**已知 trade-off**：
+
+- 所有 callId 的 sentence merger 状态集中在 Redis Cluster 中**单个 master 节点的单个 slot**
+- 单 Pod 高峰估算：~50 次/秒 ZADD（每次 handleSentence 三次写）+ 200ms 轮询
+- 全集群 N Pod 高峰：约 50N 次/秒 写 + N 次/200ms 轮询，对单 Redis 节点负载有限（典型 Redis 节点 10w QPS 以上）
+
+**扩容触发条件**：
+
+- 单通话日均 > 5 万通（当前 §34 估算 2 万通）
+- 或单 Pod 高峰 sentence merger 写入 > 200 次/秒
+- 触发后需切换到独立 Redis 实例承载延迟队列，或改用 Redisson DelayedQueue 重新实现 M02
+
+**不在本期范围**：F17 sentence merger 独立 Redis 实例（待实现）
 
 ---
 
@@ -781,7 +806,8 @@ public class DialogHistoryManager {
     }
 
     public void cleanup(String callId) {
-        redisTemplate.delete(key(callId));
+        // 行内 Redis 规范不做应用层显式 delete，依赖 TTL 自动过期。
+        log.debug("Cleanup invoked, relying on TTL expiration, callId={}", callId);
     }
 
     private DialogMessage toDialogMessage(AsrSentenceEvent event) {
@@ -869,12 +895,11 @@ public class CallSessionManager {
 
     public void bind(CallSessionDTO session) {
         String key = key(session.getCallId());
-        Map<String, String> fields = Map.of(
-            "operatorId", session.getOperatorId(),
-            "customerId", session.getCustomerId(),
-            "customerType", session.getCustomerType(),
-            "sessionStartTime", String.valueOf(System.currentTimeMillis())
-        );
+        Map<String, String> fields = new HashMap<>();
+        fields.put("operatorId", session.getOperatorId());
+        fields.put("customerId", session.getCustomerId());
+        fields.put("customerType", session.getCustomerType());
+        fields.put("sessionStartTime", String.valueOf(System.currentTimeMillis()));
         redisTemplate.opsForHash().putAll(key, fields);
         redisTemplate.expire(key, Duration.ofMinutes(30));
     }
@@ -1123,15 +1148,13 @@ copilot:
 public class IntentRecognitionClient {
 
     @CircuitBreaker(name = "aiIntentClient", fallbackMethod = "fallback")
-    public IntentResult recognize(String callId) {
+    public IntentRecognitionOutcome recognize(String callId) {
         // 正常调用逻辑
     }
 
-    private IntentResult fallback(String callId, Throwable t) {
+    private IntentRecognitionOutcome fallback(String callId, Throwable t) {
         log.warn("AI circuit breaker open: callId={}", callId);
-        metricsService.recordAiCircuitBreakerOpen();
-        // 前端展示"AI 不可用"灰态
-        return null;
+        return IntentRecognitionOutcome.failure(ReasonCodeConstants.AI_CIRCUIT_BREAKER_OPEN);
     }
 }
 ```
@@ -1141,18 +1164,16 @@ public class IntentRecognitionClient {
 > 防止单通话超频调用 AI（恶意或异常）。
 
 ```java
-public IntentResult recognize(String callId) {
-    String key = "copilot:ai_count:" + callId;
-    Long count = redisTemplate.opsForValue().increment(key);
-    if (count == 1L) {
-        redisTemplate.expire(key, Duration.ofHours(2));
+public IntentRecognitionOutcome recognize(String callId) {
+    if (!precheckAiCall(callId)) {
+        return IntentRecognitionOutcome.failure(
+            ReasonCodeConstants.AI_CALL_LIMIT_EXCEEDED);
     }
-    if (count > maxAiCallsPerCall) {
-        triggerLogService.logFailure(callId, null,
-            ResultStatus.FAIL, ReasonCode.AI_CALL_LIMIT_EXCEEDED);
-        return null;
+    IntentRecognitionOutcome outcome = callAi(callId);
+    if (outcome.isSuccess()) {
+        incrementAiCallCount(callId);
     }
-    // 继续调用
+    return outcome;
 }
 ```
 
@@ -1196,17 +1217,23 @@ public class IntentRecognitionClient {
     @Autowired private IntentTreeLoader treeLoader;
     @Autowired private ExecutedStepsManager stepsManager;
 
-    public IntentResult recognize(String callId) {
+    public IntentRecognitionOutcome recognize(String callId) {
         // 1. 取全量历史（客户+坐席）
         List<DialogMessage> fullHistory = historyManager.getHistory(callId);
-        if (fullHistory.isEmpty()) return null;
+        if (fullHistory.isEmpty()) {
+            return IntentRecognitionOutcome.failure(
+                ReasonCodeConstants.NO_CUSTOMER_HISTORY);
+        }
 
         // 2. 过滤只保留客户消息（DD-V1.1 关键设计）
         List<DialogMessage> customerOnly = fullHistory.stream()
             .filter(m -> "CUSTOMER".equals(m.getSpeakerRole()))
             .collect(Collectors.toList());
 
-        if (customerOnly.isEmpty()) return null;
+        if (customerOnly.isEmpty()) {
+            return IntentRecognitionOutcome.failure(
+                ReasonCodeConstants.NO_CUSTOMER_HISTORY);
+        }
 
         // 3. 构建请求
         IntentRecognitionRequest request = IntentRecognitionRequest.builder()
@@ -1225,8 +1252,7 @@ public class IntentRecognitionClient {
         } catch (FeignException e) {
             log.warn("AI intent recognition failed: callId={}, status={}",
                 callId, e.status(), e);
-            metricsService.recordAiFailure();
-            return null;  // 静默失败
+            throw e;  // 交给 Resilience4j fallback 分类为 AI_NETWORK_FAIL
         }
     }
 }
@@ -1263,11 +1289,14 @@ public class ExecutedStepsManager {
         List<String> raw = redisTemplate.opsForList()
             .range("copilot:steps:" + callId, 0, -1);
         if (raw == null) return Collections.emptyList();
-        return raw.stream().map(s -> JSON.parseObject(s, ExecutedStep.class)).toList();
+        return raw.stream()
+            .map(s -> JSON.parseObject(s, ExecutedStep.class))
+            .collect(Collectors.toList());
     }
 
     public void cleanup(String callId) {
-        redisTemplate.delete("copilot:steps:" + callId);
+        // 行内 Redis 规范不做应用层显式 delete，依赖 TTL 自动过期。
+        log.debug("Cleanup invoked, relying on TTL expiration, callId={}", callId);
     }
 }
 ```
@@ -1280,15 +1309,14 @@ public class ExecutedStepsManager {
 
 ```mermaid
 flowchart TD
-    A[输入 intentCode] --> B[查询 CLOB 反向索引<br/>copilotIndex.intentToItems]
+    A[输入 intentCode] --> B[查询 CopilotConfigSnapshot<br/>intentToActions]
     B --> C{有候选?}
     C -.无.-> X[返回空,记录无映射意图]
-    C -.有.-> D[加载候选项完整配置]
-    D --> E[过滤已禁用]
-    E --> F[过滤静默列表中的]
-    F --> G[评估 condition_rule]
-    G --> H[按 priority 倒序]
-    H --> I[返回 List ItemCandidate]
+    C -.有.-> D[加载 action 完整配置]
+    D --> E[过滤已禁用 action]
+    E --> F[过滤静默列表中的 actionId]
+    F --> G[按 mapping_priority 倒序]
+    G --> H[返回 List ItemCandidate]
 ```
 
 ### 14.2 数据加载
@@ -1297,8 +1325,8 @@ flowchart TD
 @Component
 public class CopilotConfigCache {
 
-    @Autowired private MenuVersionDao menuVersionDao;
-    private volatile MenuVersionData currentVersion;
+    @Autowired private CopilotConfigRepository configRepository;
+    private volatile CopilotConfigSnapshot currentSnapshot;
 
     @PostConstruct
     public void init() {
@@ -1306,91 +1334,33 @@ public class CopilotConfigCache {
     }
 
     /**
-     * 由 Admin 接口触发刷新
+     * 由 Admin 接口触发刷新，也由版本轮询兜底触发
      */
     public void loadLatestVersion() {
-        String configClob = menuVersionDao.fetchLatestActiveVersion();
-        MenuVersionData newVersion = JSON.parseObject(configClob,
-            MenuVersionData.class);
-        validateConfig(newVersion);
-        this.currentVersion = newVersion;
-        log.info("Loaded config version: {}", newVersion.getVersion());
+        CopilotConfigSnapshot snapshot = configRepository.loadLatestSnapshot();
+        validateConfig(snapshot);
+        this.currentSnapshot = snapshot;
+        log.info("Loaded copilot config version: {}", snapshot.getVersionId());
     }
 
-    public List<ItemReference> findCandidatesByIntent(String intentCode) {
-        if (currentVersion == null) return Collections.emptyList();
-        return currentVersion.getCopilotIndex()
-            .getIntentToItems()
+    public List<ActionReference> findCandidatesByIntent(String intentCode) {
+        if (currentSnapshot == null) return Collections.emptyList();
+        return currentSnapshot.getIntentToActions()
             .getOrDefault(intentCode, Collections.emptyList());
     }
 
-    public ItemFullConfig getItemConfig(long itemId) {
-        return currentVersion.findItemById(itemId);
+    public CopilotActionConfig getActionConfig(String actionId) {
+        if (currentSnapshot == null) return null;
+        return currentSnapshot.getActionById().get(actionId);
     }
 }
 ```
 
-### 14.3 condition_rule 评估器
+### 14.3 条件规则说明
 
-```java
-public interface RuleEvaluator {
-    boolean evaluate(ConditionRule rule, EvaluationContext ctx);
-}
+本期删除 `condition_rule`、`EvaluationContext`、`JsonRuleEvaluator`。意图到 action 的候选关系只由 `cs_copilot_intent_mapping` 和 `mapping_priority` 决定，避免在 MVP 阶段引入不可视、难验证的规则表达式。
 
-@Component
-public class JsonRuleEvaluator implements RuleEvaluator {
-
-    @Override
-    public boolean evaluate(ConditionRule rule, EvaluationContext ctx) {
-        if (rule == null) return true;
-
-        if (rule.getAll() != null) {
-            for (ConditionItem item : rule.getAll()) {
-                if (!evaluateItem(item, ctx)) return false;
-            }
-        }
-        if (rule.getAny() != null && !rule.getAny().isEmpty()) {
-            return rule.getAny().stream().anyMatch(item -> evaluateItem(item, ctx));
-        }
-        return true;
-    }
-
-    private boolean evaluateItem(ConditionItem item, EvaluationContext ctx) {
-        Object actualValue = ctx.getValueByPath(item.getField());
-        Object expectedValue = item.getValue();
-        return switch (item.getOp()) {
-            case "eq" -> Objects.equals(actualValue, expectedValue);
-            case "not_eq" -> !Objects.equals(actualValue, expectedValue);
-            case "in" -> ((List<?>) expectedValue).contains(actualValue);
-            case "exists" -> actualValue != null;
-            case "not_exists" -> actualValue == null;
-            // ...其他运算符
-            default -> throw new IllegalArgumentException("Unknown op: " + item.getOp());
-        };
-    }
-}
-```
-
-支持的运算符：`eq` / `not_eq` / `in` / `not_in` / `exists` / `not_exists` / `gt` / `gte` / `lt` / `lte`
-
-#### 规则异常默认 false（DD-V1.2 新增 P1-19 部分采纳）
-
-> 防御性编程：condition_rule 解析或评估异常时，**返回 false**（不展示推荐），同时记录配置错误。
-> 不做完整字段白名单和深度限制（属于 F09 配置沙箱范围）。
-
-```java
-public boolean evaluate(ConditionRule rule, EvaluationContext ctx) {
-    if (rule == null) return true;
-    try {
-        // 评估逻辑
-        return doEvaluate(rule, ctx);
-    } catch (Exception e) {
-        log.error("ConditionRule evaluation failed: {}", JSON.toJSONString(rule), e);
-        metricsService.recordRuleEvaluationError();
-        return false;  // 异常时不展示推荐
-    }
-}
-```
+如果后续需要“仅当客户等级/业务状态满足条件时推荐”，应单独设计规则引擎能力，并补充字段白名单、表达式复杂度限制、发布前沙箱测试和 Bad Case 追踪。
 
 ### 14.5 灰度白名单（DD-V1.2 新增 P1-9）
 
@@ -1440,144 +1410,60 @@ if (!grayWhitelistFilter.isOperatorEnabled(operatorId)) {
 
 ---
 
-## 15. 参数解析（M08）— 含 Cookie 占位符
+## 15. 参数配置透传（M08）— 业务参数类型
 
 ### 15.1 标准参数枚举
 
-按你的指示**情况 B**：保留从 session/callMeta 取参数的能力（即存量 13 个 param_type），不实现 ASR 实体抽取。
+本期纯 action 只允许配置前端工作台可取值的业务参数类型。后端不从 session/callMeta 取客户参数值，只校验配置并透传给前端，前端按 `paramType` 从 Cookie / 工作台上下文取值。不实现 ASR 实体抽取。
 
 ```java
 public enum StandardParamType {
 
-    // 客户信息（来自 session）
-    CUST_NO("客户号", SourceType.SESSION, "customer.customerId", false),
-    CUST_ID_NO("证件号", SourceType.SESSION, "customer.idNo", true),
-    CUST_ID_NO_NOTYPE("无证件号类型", SourceType.SESSION, "customer.noIdType", false),
-    PALM_LIFE_USER_ID("掌上生活用户ID", SourceType.SESSION, "customer.palmLifeUserId", false),
-
-    // 联系方式
-    MOBPHN1("预留手机号一", SourceType.SESSION, "customer.phoneNo", true),
-    MOBPHN1_NO_ZERO("预留手机号一(去0)", SourceType.SESSION, "customer.phoneNoNoZero", true),
-
-    // 账户
-    ACCOUNT_NO("账户号", SourceType.SESSION, "accounts[0].accountNo", false),
-
-    // 地址
-    ADDR_TEXT("地址", SourceType.SESSION, "customer.address", true),
-    ENCODE_ADDR_TEXT("地址(编码)", SourceType.SESSION, "customer.addressEncode", true),
-
-    // 通话
-    CALL_ID("通话ID", SourceType.CALL_META, "callId", false),
-    IN_LINE_N0("进线号码", SourceType.CALL_META, "calledNumber", true),
-
-    // 业务控制（字面值）
-    SUPP_CARD_INTERCEPT("是否拦截纯附属卡人", SourceType.LITERAL, null, false),
-
-    // 自定义
-    EXP("自定义参数", SourceType.LITERAL, null, false),
-
-    // === DD-V1.1 新增：Cookie 占位符 ===
-    COOKIE_PLACEHOLDER("Cookie 占位符", SourceType.COOKIE, null, false);
+    CUST_NO("客户号", false),
+    CUST_ID_NO("证件号", true),
+    MOBPHN1("预留手机号", true),
+    ACCOUNT_NO("账户号", false);
 
     private final String displayName;
-    private final SourceType sourceType;
-    private final String defaultSourceKey;
     private final boolean sensitive;
-
-    public enum SourceType {
-        SESSION,        // 来自 SessionContext
-        CALL_META,      // 来自 CallMeta
-        LITERAL,        // 字面值（来自 param_value）
-        COOKIE          // DD-V1.1 新增：Cookie 占位符，前端替换
-    }
 }
 ```
 
-### 15.2 Cookie 受控占位符方案（DD-V1.2 调整 P0-4）
+### 15.2 业务参数透传方案
 
-> **DD-V1.2 关键修订**：增加 Cookie 名白名单 + Cookie-域名绑定白名单，防止运营误配导致敏感 Cookie 泄露。
+> 当前实现不允许后端配置具体 Cookie 名，也不允许旧版占位符参数类型。后端只配置业务语义参数类型，前端负责把业务参数类型映射到 Cookie / 工作台上下文中的实际值。
 
 #### 配置示例
 
 ```
-某功能配置 cs_menu_item_param 中：
-  param_type=COOKIE_PLACEHOLDER
-  param_key=token        （URL 参数名）
-  param_value=token      （cookie 字段名）
+某个纯 action 的 `cs_copilot_action.param_config_json` 中：
+  param_type=CUST_NO
+  param_key=custNo       （目标系统需要的 URL 参数名或组件 props 名）
+  param_value=NULL       （本期不使用）
 
-服务端解析后输出：
-  paramKey=token
-  paramValue=${COOKIE.token}
+服务端输出：
+  action.paramConfigs = 原始参数配置数组（paramType/paramKey）
 
-服务端拼接 URL：
-  https://target/page?custNo=C123&token=${COOKIE.token}
+服务端不拼接客户参数值：
+  action.url = https://target/page
 
 前端拿到指令后：
-  ① 校验 token 在 Cookie 白名单内 → 通过
-  ② 校验 target/page 域名允许使用 token → 通过
-  ③ 从 cookie 读取 token 字段
-  ④ 替换 ${COOKIE.token} 为实际值
-  ⑤ 得到最终 URL：
-     https://target/page?custNo=C123&token=eyJhbGciOiJ...
-```
-
-#### Cookie 白名单配置
-
-```yaml
-copilot:
-  cookie-placeholder:
-    enabled: true
-    # 允许使用的 Cookie 名白名单（运营配置只能使用这些）
-    allowed-cookies:
-      - workbenchSession
-      - businessParam1
-      - businessParam2
-    # Cookie 与目标域名绑定（细粒度限制）
-    domain-bindings:
-      frdctrfront.paas.cmbchina.cn:
-        - workbenchSession
-      mccusweb.paas.cmbchina.cn:
-        - businessParam1
-        - businessParam2
-    # 必填 Cookie（缺失时阻断打开，不保留占位符）
-    required-cookies:
-      - workbenchSession
+  ① 根据 paramType=CUST_NO 从 Cookie / 工作台上下文读取实际值
+  ② 按 paramKey 拼接最终 URL 或组件 props：
+     https://target/page?custNo=C123
 ```
 
 #### 服务端校验
 
-> 配置发布前（M12 一键发布时）和运行时（M08 解析时）双重校验：
+> 配置发布前（M12 一键发布时）和运行时加载配置时校验参数配置合法性；运行时指令构建不读取客户参数值：
 
 ```java
-@Component
-public class CookiePlaceholderValidator {
-    
-    @Value("#{'${copilot.cookie-placeholder.allowed-cookies}'.split(',')}")
-    private Set<String> allowedCookies;
-    
-    public ValidationResult validate(ItemParam param, String targetUrl) {
-        if (!"COOKIE_PLACEHOLDER".equals(param.getParamType())) {
-            return ValidationResult.SKIP;
+private void validateParamConfigs(CopilotActionConfig action, List<String> errors) {
+    for (ItemParam param : action.getParams()) {
+        StandardParamType.valueOf(param.getParamType()); // 仅允许 CUST_NO/CUST_ID_NO/MOBPHN1/ACCOUNT_NO
+        if (!StringUtils.hasText(param.getParamKey())) {
+            errors.add("paramKey missing");
         }
-        
-        String cookieName = param.getParamValue();
-        
-        // ① Cookie 名白名单
-        if (!allowedCookies.contains(cookieName)) {
-            return ValidationResult.fail(
-                "Cookie '" + cookieName + "' not in whitelist");
-        }
-        
-        // ② Cookie-域名绑定
-        String targetDomain = extractDomain(targetUrl);
-        Set<String> allowedForDomain = domainBindings.get(targetDomain);
-        if (allowedForDomain == null || !allowedForDomain.contains(cookieName)) {
-            return ValidationResult.fail(
-                "Cookie '" + cookieName + "' not allowed for domain '" 
-                + targetDomain + "'");
-        }
-        
-        return ValidationResult.OK;
     }
 }
 ```
@@ -1585,85 +1471,50 @@ public class CookiePlaceholderValidator {
 #### 安全说明
 
 ```
-✗ 不允许进入 URL query 的 Cookie 类型：
-  - 认证 token（如 SSO token, JWT）
-  - 含 session 的高敏字段
-  - 长期有效的凭证
+✗ 不允许后端配置：
+  - 具体 Cookie 名
+  - 认证 token / SSO token / JWT
+  - 任意自定义参数表达式
 
-✓ 允许进入的 Cookie 类型：
-  - 短期工作台会话标识（仅当目标系统也是行内同体系）
-  - 业务参数类（如客户标签、当前选中的业务类型）
-
-⚠️ 长期方向（F14）：改造为后端一次性 token + 目标系统反查
-  - URL 不带敏感字段，只带 jumpToken
-  - jumpToken 5 分钟有效，用后即失效
-```
-
-#### Cookie 名格式（DD-V1.2 调整 P2-5）
-
-```
-原 DD-V1.1 正则：\w+（仅字母数字下划线）
-DD-V1.2 调整：[A-Za-z0-9_.-]+（兼容含 .- 的 cookie 名）
-配合白名单使用，正则放宽不影响安全。
+✓ 允许后端配置：
+  - CUST_NO
+  - CUST_ID_NO
+  - MOBPHN1
+  - ACCOUNT_NO
 ```
 
 #### 数据流
 
 ```mermaid
 flowchart LR
-    A[配置: param_type=COOKIE_PLACEHOLDER<br/>param_key=token<br/>param_value=token] --> B[M08 参数解析]
-    B --> C[paramKey=token<br/>paramValue=占位符 COOKIE.token]
-    C --> D[M09 拼接 URL]
-    D --> E[URL: ?token=占位符]
-    E --> F[WebSocket 推送给前端]
-    F --> G[前端 SDK 接收]
-    G --> H[读取 cookie.token 实际值]
-    H --> I[替换占位符]
-    I --> J[最终 URL]
+    A[配置: param_type=CUST_NO<br/>param_key=custNo] --> B[M12/运行时配置校验]
+    B --> C[M09 指令构建]
+    C --> D[action.paramConfigs 透传]
+    D --> E[WebSocket 推送给前端]
+    E --> F[前端 SDK 接收]
+    F --> G[按 paramType 读取 Cookie/工作台上下文]
+    G --> H[按 paramKey 拼接最终 URL/Props]
 ```
 
-### 15.3 参数解析器实现
+### 15.3 参数配置透传
 
 ```java
 @Component
-public class ParamResolver {
+public class DirectiveBuilder {
 
     /**
-     * 根据 cs_menu_item_param 列表解析最终参数 map
+     * 纯 action 不在后端解析客户参数。
+     * 后端只把 param_config_json 结构化透传给前端，由前端按 paramType 取值。
      */
-    public Map<String, String> resolveParams(
-            List<ItemParam> paramList,
-            ParamContext ctx) {
-        Map<String, String> result = new LinkedHashMap<>();
-
-        for (ItemParam param : paramList) {
-            StandardParamType type;
-            try {
-                type = StandardParamType.valueOf(param.getParamType());
-            } catch (IllegalArgumentException e) {
-                log.warn("Unknown param_type: {}", param.getParamType());
-                continue;
-            }
-
-            String value = resolveValue(type, param, ctx);
-            if (value != null) {
-                result.put(param.getParamKey(), value);
-            }
-        }
-        return result;
-    }
-
-    private String resolveValue(StandardParamType type, ItemParam param,
-                                ParamContext ctx) {
-        return switch (type.getSourceType()) {
-            case LITERAL -> param.getParamValue();
-            case SESSION -> ctx.getSession().getValueByPath(type.getDefaultSourceKey());
-            case CALL_META -> ctx.getCallMeta().getValueByPath(type.getDefaultSourceKey());
-            // DD-V1.1 新增
-            case COOKIE -> "${COOKIE." + param.getParamValue() + "}";
-                          // param_value 存 cookie 字段名
-                          // 输出占位符给前端替换
-        };
+    public ActionInfo buildAction(CopilotActionConfig action) {
+        return ActionInfo.builder()
+            .targetSource("ACTION")
+            .targetKind(action.getTargetKind())
+            .openMode(action.getOpenMode())
+            .actionType(deriveActionType(action))
+            .url(resolveTargetUrl(action))      // base URL / routePath，不拼客户参数
+            .paramConfigs(action.getParams())  // 原 param_config_json
+            .build();
     }
 }
 ```
@@ -1676,8 +1527,8 @@ public class ParamResolver {
   ✗ LLM 兜底实体抽取
 
 参数缺失处理：
-  - 必填参数缺失 → 不展示推荐
-  - 选填参数缺失 → 跳转 URL 不带该参数，坐席页面手动输入
+  - 后端不因客户参数缺失阻断推荐
+  - 前端按 paramType 取值；缺失时按前端打开逻辑决定阻断、跳过或提示坐席补录
 ```
 
 ---
@@ -1701,8 +1552,9 @@ public class ParamResolver {
   },
 
   "function": {
-    "itemId": 12345,
-    "itemName": "行程报备登记",
+    "actionId": "act_travel_declare",
+    "actionName": "境外行程报备",
+    "menuItemId": 12345,
     "functionPath": "信用卡风险侦测系统-参数设置-行程报备登记"
   },
 
@@ -1713,14 +1565,8 @@ public class ParamResolver {
   },
 
   "action": {
-    "targetKind": "IFRAME",
-    "openMode": "IFRAME",
-    "actionType": "OPEN_IFRAME",
-    "url": "https://frdctrfront.paasuat.cmbchina.cn/...?custNo=C123&token=${COOKIE.token}",
-    "params": {
-      "custNo": "C123",
-      "token": "${COOKIE.token}"
-    }
+    "targetSource": "MENU_ITEM",
+    "actionType": "OPEN_MENU_ITEM"
   },
 
   "risk": {
@@ -1751,17 +1597,7 @@ public class ParamResolver {
 @Component
 public class DirectiveBuilder {
 
-    @Autowired private UrlBuilder urlBuilder;
-    @Autowired private ParamResolver paramResolver;
-
     public DirectiveDTO build(BuildContext bc) {
-        Map<String, String> params = paramResolver.resolveParams(
-            bc.getItem().getParams(), bc.getParamContext());
-
-        // URL 拼接，含 Cookie 占位符
-        String urlWithPlaceholders = urlBuilder.buildUrl(
-            bc.getItem().getUrl(), params);
-
         String actionType = deriveActionType(
             bc.getItem().getCopilotExt().getTargetKind(),
             bc.getItem().getCopilotExt().getOpenMode());
@@ -1780,8 +1616,8 @@ public class DirectiveBuilder {
                 .targetKind(bc.getItem().getCopilotExt().getTargetKind())
                 .openMode(bc.getItem().getCopilotExt().getOpenMode())
                 .actionType(actionType)
-                .url(urlWithPlaceholders)
-                .params(params)
+                .url(bc.getItem().getUrl())
+                .paramConfigs(bc.getItem().getParams())
                 .build())
             .risk(buildRisk(bc))
             .build();
@@ -1878,10 +1714,7 @@ public class UrlBuilder {
         for (Map.Entry<String, String> e : finalParams.entrySet()) {
             if (!first) sb.append("&");
             String value = e.getValue();
-            // ${COOKIE.xxx} 占位符不编码（前端替换后再编码）
-            if (!value.startsWith("${COOKIE.")) {
-                value = URLEncoder.encode(value, StandardCharsets.UTF_8);
-            }
+            value = URLEncoder.encode(value, StandardCharsets.UTF_8);
             sb.append(e.getKey()).append("=").append(value);
             first = false;
         }
@@ -1907,17 +1740,20 @@ public class UrlBuilder {
         
         log.warn("Param key conflict: {}, policy: {}", conflicts, sameKeyPolicy);
         
-        return switch (sameKeyPolicy) {
-            case "OVERRIDE" -> params;  // 默认：params 覆盖
-            case "PRESERVE" -> {
-                Map<String, String> result = new LinkedHashMap<>(params);
-                conflicts.forEach(result::remove);
-                yield result;
+        if ("OVERRIDE".equals(sameKeyPolicy)) {
+            return params;
+        }
+        if ("PRESERVE".equals(sameKeyPolicy)) {
+            Map<String, String> result = new LinkedHashMap<>(params);
+            for (String conflict : conflicts) {
+                result.remove(conflict);
             }
-            case "ERROR" -> throw new UrlValidationException(
-                "Param key conflict: " + conflicts);
-            default -> throw new IllegalStateException();
-        };
+            return result;
+        }
+        if ("ERROR".equals(sameKeyPolicy)) {
+            throw new UrlValidationException("Param key conflict: " + conflicts);
+        }
+        throw new IllegalStateException();
     }
 }
 ```
@@ -1953,21 +1789,25 @@ public class CopilotPushService {
 
     @Autowired private SimpMessagingTemplate messagingTemplate;
 
-    public void pushDirective(DirectiveDTO directive) {
+    public boolean publishDirectiveAsync(DirectiveDTO directive) {
         String destination = "/user/" + directive.getOperatorId()
             + "/copilot/directive";
         try {
             messagingTemplate.convertAndSend(destination, directive);
             log.info("Pushed: directiveId={}, operatorId={}",
                 directive.getDirectiveId(), directive.getOperatorId());
+            return true;
         } catch (Exception e) {
             log.error("Push failed: {}", directive.getDirectiveId(), e);
+            return false;
         }
     }
 }
 ```
 
 > 注：复用工作台已有 WebSocket 基础设施。
+>
+> **送达保证说明**：CopilotPushService.publishDirectiveAsync 只保证 Redis Pub/Sub 发布成功，不保证指令送达任何 WebSocket 连接。trigger_log.directive_status=PUBLISHED 表示已发布，真实送达需要前端 ACK 反馈机制（本期未实现，预留 markDirectiveDelivered 方法）。BI 看板计算覆盖率时应注意此语义。
 
 ---
 
@@ -1977,10 +1817,10 @@ public class CopilotPushService {
 
 | feedbackType | 含义 | 后端处理 |
 |--------------|------|---------|
-| ACCEPTED | 坐席点击打开 | 持久化日志 + 追加 executedSteps |
-| IGNORED | 坐席忽略 | 60s 内不重复推荐相同 intentCode |
-| WRONG_INTENT | 意图识别错误 | 本通话内静默该 intentCode |
-| WRONG_FUNCTION | 意图对，功能映射错 | 本通话内静默该 itemId |
+| ACCEPTED | 坐席点击打开 | MVP 阶段写入 ES 后立即返回 |
+| IGNORED | 坐席忽略 | MVP 阶段写入 ES 后立即返回 |
+| WRONG_INTENT | 意图识别错误 | MVP 阶段写入 ES 后立即返回 |
+| WRONG_FUNCTION | 意图对，功能映射错 | MVP 阶段写入 ES 后立即返回 |
 
 ### 17.2 反馈接口
 
@@ -1991,16 +1831,9 @@ public class CopilotPushService {
 ```mermaid
 flowchart TD
     A[POST /copilot/feedback] --> B[校验参数]
-    B --> C[持久化反馈日志<br/>cs_copilot_feedback_log]
-    C --> D{feedbackType?}
-    D -.ACCEPTED.-> E[追加 executedSteps]
-    D -.IGNORED.-> F[加倍 cooldown]
-    D -.WRONG_INTENT.-> G[静默该 intentCode 整通通话]
-    D -.WRONG_FUNCTION.-> H[静默该 itemId 整通通话]
-    E --> END[返回成功]
-    F --> END
-    G --> END
-    H --> END
+    B --> C[投递有界异步队列]
+    C --> D[立即返回 RECORDED]
+    C --> E[后台写入 ES<br/>cs-copilot-feedback-log]
 ```
 
 ### 17.4 关键代码骨架
@@ -2009,73 +1842,26 @@ flowchart TD
 @Service
 public class FeedbackService {
 
-    @Autowired private FeedbackLogDao feedbackLogDao;
-    @Autowired private TriggerLogDao triggerLogDao;
-    @Autowired private ExecutedStepsManager stepsManager;
-    @Autowired private MuteListManager muteListManager;
     @Autowired private MetricsService metricsService;
 
     public FeedbackResult handleFeedback(FeedbackRequest req) {
-        // 【DD-V1.2 P0-6】1. 服务端指令校验
-        TriggerLogRecord triggerLog = triggerLogDao.findByDirectiveId(req.getDirectiveId());
-        if (triggerLog == null) {
-            return FeedbackResult.fail("DIRECTIVE_NOT_FOUND");
-        }
-        
-        // 1.1 过期校验
-        if (triggerLog.getExpireAt() != null 
-                && Instant.now().isAfter(triggerLog.getExpireAt())) {
-            return FeedbackResult.fail("DIRECTIVE_EXPIRED");
-        }
-        
-        // 1.2 上下文匹配校验
-        if (!triggerLog.getCallId().equals(req.getCallId())
-                || !Objects.equals(triggerLog.getOperatorId(), req.getOperatorId())
-                || !Objects.equals(triggerLog.getIntentCode(), req.getIntentCode())
-                || !Objects.equals(triggerLog.getItemId(), req.getItemId())) {
-            log.warn("Feedback context mismatch: directiveId={}, req={}, log={}", 
-                req.getDirectiveId(), req, triggerLog);
-            return FeedbackResult.fail("CONTEXT_MISMATCH");
-        }
-        
-        // 【DD-V1.2 P1-14】2. 幂等控制：检查是否已有有效反馈
-        boolean alreadyEffective = feedbackLogDao.existsEffective(req.getDirectiveId());
-        boolean isEffective = !alreadyEffective;  // 首次为 Y，后续为 N
-        
-        // 3. 持久化（含 trigger_log_id 反查 - P1-15）
-        FeedbackLog logEntity = toLog(req);
-        logEntity.setTriggerLogId(triggerLog.getLogId());
-        logEntity.setIsEffective(isEffective ? "Y" : "N");
-        feedbackLogDao.insert(logEntity);
-        metricsService.recordFeedback(req.getFeedbackType());
-        
-        // 4. 仅有效反馈影响业务状态
-        if (!isEffective) {
-            return FeedbackResult.success("DUPLICATE_RECORDED");
-        }
-        
-        switch (req.getFeedbackType()) {
-            case "ACCEPTED" -> stepsManager.appendStep(
-                req.getCallId(), req.getIntentCode(), req.getIntentName());
-            case "IGNORED" -> muteListManager.muteIntent(
-                req.getCallId(), req.getIntentCode(), Duration.ofSeconds(120));
-            case "WRONG_INTENT" -> muteListManager.muteIntentForCall(
-                req.getCallId(), req.getIntentCode());
-            case "WRONG_FUNCTION" -> muteListManager.muteItemForCall(
-                req.getCallId(), req.getItemId());
-        }
-        
-        return FeedbackResult.success("EFFECTIVE");
+        validateBasic(req);
+        // MVP：只采集反馈结果，投递有界异步队列后立即返回
+        metricsService.recordFeedback(req, null, false);
+        return FeedbackResult.success("RECORDED");
     }
 }
 ```
 
-#### 数据库幂等保证
+MVP 阶段反馈接口定位为埋点采集，不做 `trigger_log` 反查、不做 CAS 消费指令，也不更新 executedSteps / 静默列表。后续如果要恢复严格反馈闭环，需要重新启用最小 directive 状态存储或 TDSQL trigger_log。
 
-> DD-V1.2 P1-14：trigger_log.directive_id 唯一索引；feedback_log 增加 is_effective 字段。
-> 详见第四篇 21 章 DDL。
+#### ES 写入保证
+
+反馈结果先投递到有界异步队列，再由后台线程使用 Java High Level REST Client 写入 ES。队列满或 ES 写入失败只记录 `[M16]` 告警，不影响反馈接口返回。
 
 ### 17.5 静默列表
+
+> 静默列表属于通话级临时状态，通话结束后不主动删除 Redis key，依赖 2 小时 TTL 自动过期。
 
 ```java
 @Component
@@ -2095,7 +1881,7 @@ public class MuteListManager {
                 "copilot:mute:intent:" + callId, intentCode));
     }
 
-    // 类似地：muteItemForCall / isItemMuted
+    // 类似地：muteActionForCall / isActionMuted
 }
 ```
 
@@ -2105,12 +1891,12 @@ public class MuteListManager {
 
 ### 18.1 埋点目标
 
-> 按你的指示：业务面监控只做数据落库，不做看板。看板留待 F10 / F11 后续实现。
+> MVP 调整：业务面监控先采集，不做看板。调用/触发日志输出应用日志，反馈结果写 ES；看板留待 F10 / F11 实现。
 
 ```
-落库的是结构化业务数据，便于：
+采集的是结构化业务数据，便于：
   - 后续基于这些数据做看板（F10、F11）
-  - 运营人员通过 SQL 查询做 Bad Case 分析
+  - 运营人员通过日志检索 / ES 查询做 Bad Case 分析
   - 配置质量评估
 ```
 
@@ -2137,74 +1923,62 @@ flowchart TD
   - 记录 candidateCount
 
 触发点 2：候选过滤后
-  - 记录 condition_rule 评估结果
-  - 记录最终选定的 itemId
+  - 记录 action 启用、静默列表、菜单项关联校验结果
+  - 记录最终选定的 actionId 和可选 menuItemId
 
 触发点 3：指令推送后
   - 记录 directiveId
-  - 记录 ai_request_id / ai_response_time_ms
 ```
 
 ### 18.4 反馈日志埋点点位
 
 ```
 反馈接口入口（M11）
-  - 记录每条反馈
-  - 字段含 directiveId / call_id / operator_id / intentCode / itemId / feedbackType
+  - MVP 阶段写入 ES 索引 cs-copilot-feedback-log
+  - 字段含 directiveId / call_id / operator_id / intentCode / actionId / menuItemId / feedbackType
 ```
 
 ### 18.5 关键字段（DD-V1.2 扩展 P1-16，详细 DDL 见第四篇）
 
-> DD-V1.2 增加 result_status / reason_code / filter_stage 等字段，便于 Bad Case 分析和后续看板。
+> MVP 阶段触发日志先输出应用日志，不写 trigger_log 表；反馈结果写 ES。以下字段作为日志/ES 文档结构，TDSQL DDL 作为后续严格反馈闭环预留。
 
 ```
-cs_copilot_trigger_log（触发日志，DD-V1.2 字段扩展）
+trigger application log（触发日志）
   log_id              主键
   call_id             通话 ID
   operator_id         坐席工号
   customer_id         客户号
   intent_code         意图代码
   intent_name         意图名称
-  item_id             功能 ID
-  item_name           功能名称
+  action_id           Copilot 动作 ID
+  action_name         Copilot 动作名称
+  menu_item_id        可选关联菜单项
   candidate_count     候选数量
   risk_level          风险等级
-  directive_id        指令 ID（UNIQUE 索引 P0-6）
+  directive_id        指令 ID
   expire_at           指令过期时间（DD-V1.2 P0-6）
   directive_status    指令状态（DD-V1.2 P0-6）
-  
-  # AI 调用情况
-  ai_request_id       AI 请求 ID
-  ai_response_time_ms AI 响应耗时
-  ai_success          AI 调用成功标志
-  ai_failure_reason   AI 失败分类（DD-V1.2 P2-10）
-                      TIMEOUT / HTTP_5XX / RESP_CODE_ERROR / 
-                      JSON_PARSE_ERROR / EMPTY_INTENT / 其他
   
   # 业务结果（DD-V1.2 P1-16）
   result_status       结果状态：SUCCESS / FAIL / FILTERED
   reason_code         原因编码（详见下方枚举）
   filter_stage        过滤发生的阶段
-  missing_params_json 参数缺失情况（JSON 数组）
-  
-  # ASR 相关（DD-V1.2 P1-16）
-  asr_confidence      ASR 平均置信度
-  asr_text_hash       ASR 文本哈希（不存原文）
   
   # 通用
   trigger_time        触发时间
   config_version      配置版本
 
-cs_copilot_feedback_log（反馈日志，DD-V1.2 字段扩展）
+ES index: cs-copilot-feedback-log（反馈结果）
   log_id              主键
   directive_id        指令 ID
-  trigger_log_id      关联触发日志（DD-V1.2 P1-15 强制反查）
+  trigger_log_id      MVP 阶段为空
   call_id             通话 ID
   operator_id         坐席工号
   feedback_type       反馈类型
   intent_code         意图代码
-  item_id             功能 ID
-  is_effective        是否有效反馈 Y/N（DD-V1.2 P1-14 幂等）
+  action_id           Copilot 动作 ID
+  menu_item_id        可选关联菜单项
+  is_effective        MVP 阶段固定 N，仅表示未做严格生效闭环
   feedback_time       反馈时间
 ```
 
@@ -2212,16 +1986,21 @@ cs_copilot_feedback_log（反馈日志，DD-V1.2 字段扩展）
 
 ```
 # AI 相关
-AI_TIMEOUT                 AI 调用超时
-AI_FAILED                  AI 业务失败
 AI_CIRCUIT_BREAKER_OPEN    熔断打开
+AI_NETWORK_FAIL            AI 网络/超时失败（覆盖历史 AI_TIMEOUT 场景）
+AI_BUSINESS_FAIL           AI 响应业务失败（覆盖历史 AI_FAILED 场景）
+NO_CUSTOMER_HISTORY        无客户侧对话历史
 INTENT_EMPTY               AI 返回空意图
 INTENT_NOT_MAPPED          意图未配置映射
+
+# 已废弃（兼容历史数据，不再写入）
+AI_TIMEOUT                 [已废弃] 历史含义：AI 调用超时；现统一用 AI_NETWORK_FAIL
+AI_FAILED                  [已废弃] 历史含义：AI 业务失败；现统一用 AI_BUSINESS_FAIL
 
 # 配置相关
 RISK_DISABLED              风险等级禁用
 URL_NOT_ALLOWED            URL 白名单失败
-COOKIE_NOT_ALLOWED         Cookie 白名单失败
+PARAM_TYPE_NOT_ALLOWED     参数类型不在业务白名单中
 PARAM_MISSING              必填参数缺失
 
 # 会话相关
@@ -2244,7 +2023,7 @@ GRAY_WHITELIST             灰度白名单层
 INTENT_RECOGNITION         意图识别层
 INTENT_MAPPING             意图映射层
 CONDITION_RULE             条件规则层
-PARAM_RESOLVE              参数解析层
+PARAM_CONFIG               参数配置透传层
 URL_VALIDATION             URL 校验层
 PUSH                       推送层
 FRONT_PERMISSION           前端权限层
@@ -2254,12 +2033,11 @@ FRONT_COOLDOWN             前端频控层
 ### 18.6 后续看板（F10/F11）依赖
 
 ```
-本期落库的字段足够支撑后续看板：
-  - 触发统计：按 intent_code / item_id 分组 COUNT
+MVP 采集的日志/ES 字段足够支撑后续看板：
+  - 触发统计：按 intent_code / action_id / menu_item_id 分组 COUNT
   - 采纳率：feedback_log JOIN trigger_log
   - 错误推荐：feedback_type IN (WRONG_INTENT, WRONG_FUNCTION)
-  - AI 性能：ai_response_time_ms 分位数
-  - 无映射意图 TopN：trigger_log 中 item_id IS NULL 的记录
+  - 无映射意图 TopN：trigger_log 中 action_id IS NULL 的记录
 ```
 
 ---
@@ -2274,7 +2052,7 @@ graph TB
     PERM[M14-4 权限过滤]
     UI[M14-2 浮窗 UI]
     CARD[M14-3 推荐卡片]
-    COOKIE[M14-5 Cookie 占位符替换]
+    PARAM[M14-5 按 paramType 前端取值]
     FEEDBACK[M14-6 反馈上报]
     OPEN[M15 五种打开方式]
 
@@ -2282,8 +2060,8 @@ graph TB
     PERM -.有权限.-> UI
     PERM -.无权限.-> SKIP[静默丢弃]
     UI --> CARD
-    CARD -.坐席点击.-> COOKIE
-    COOKIE --> OPEN
+    CARD -.坐席点击.-> PARAM
+    PARAM --> OPEN
     CARD -.采纳/忽略.-> FEEDBACK
 ```
 
@@ -2297,7 +2075,7 @@ flowchart TD
     C -.无权限.-> SKIP[静默丢弃]
     C -.有权限.-> D[展示推荐卡片]
     D --> E{坐席动作}
-    E -.点击打开.-> F[Cookie 占位符替换]
+    E -.点击打开.-> F[按 paramType 前端取值并拼接]
     F --> G[执行 5 种打开方式]
     G --> H[反馈 ACCEPTED]
     E -.关闭.-> I[反馈 IGNORED]
@@ -2336,7 +2114,13 @@ const permissionFilter = (directive) => {
   }
   
   try {
-    const hasPermission = window.MenuPermission.hasItemAccess(directive.function.itemId);
+    const menuItemId = directive.function.menuItemId;
+    if (!menuItemId) {
+      // 纯 action 没有菜单权限锚点，按 Copilot 配置和灰度控制展示。
+      // 若业务要求纯 action 也做权限控制，需要补充 action 级权限模型。
+      return true;
+    }
+    const hasPermission = window.MenuPermission.hasItemAccess(menuItemId);
     if (!hasPermission) {
       submitFeedback(directive, 'NO_PERMISSION');  // 上报反馈
       return false;
@@ -2370,98 +2154,61 @@ const handleDirective = (directive) => {
 };
 ```
 
-### 19.4 Cookie 占位符替换（M14-5）
+### 19.4 参数取值与拼接（M14-5）
 
-> DD-V1.1 关键设计：URL 中 `${COOKIE.xxx}` 占位符由前端从 cookie 读取实际值后替换。
+> 关键设计：纯 action 的 `action.paramConfigs` 由后端透传，前端按业务 `paramType` 从 Cookie / 工作台上下文读取实际值，并按 `paramKey` 拼接到 URL 或组件 props。后端不配置具体 Cookie 名，前端维护 `paramType -> 取值来源` 的映射。
 
 ```javascript
-const COOKIE_PATTERN = /\$\{COOKIE\.(\w+)\}/g;
-
-const COOKIE_NAME_PATTERN = /^[A-Za-z0-9_.-]+$/;  // P2-5 兼容含 .- 的 cookie 名
-
-// DD-V1.2 P0-4：Cookie 白名单 + 域名绑定校验
-const validateCookieAccess = (cookieName, targetUrl) => {
-  if (!ALLOWED_COOKIES.includes(cookieName)) {
-    return { ok: false, reason: 'COOKIE_NOT_IN_WHITELIST' };
-  }
-  const targetDomain = new URL(targetUrl).hostname;
-  const allowedForDomain = DOMAIN_BINDINGS[targetDomain] || [];
-  if (!allowedForDomain.includes(cookieName)) {
-    return { ok: false, reason: 'COOKIE_NOT_ALLOWED_FOR_DOMAIN' };
-  }
-  return { ok: true };
+const PARAM_VALUE_RESOLVERS = {
+  CUST_NO: () => workbenchContext.getValue('CUST_NO'),
+  CUST_ID_NO: () => workbenchContext.getValue('CUST_ID_NO'),
+  MOBPHN1: () => workbenchContext.getValue('MOBPHN1'),
+  ACCOUNT_NO: () => workbenchContext.getValue('ACCOUNT_NO')
 };
 
-// URL 场景的替换（DD-V1.2 P1-13：必填 Cookie 缺失阻断）
-const replaceCookiePlaceholdersInUrl = (url) => {
-  let blocked = false;
-  let blockReason = '';
-  const finalUrl = url.replace(COOKIE_PATTERN, (match, cookieName) => {
-    const access = validateCookieAccess(cookieName, url);
-    if (!access.ok) {
-      blocked = true;
-      blockReason = access.reason;
-      return match;
-    }
-    const value = getCookie(cookieName);
-    if (value === null) {
-      // P1-13：必填 Cookie 缺失则阻断；可选 Cookie 跳过
-      if (REQUIRED_COOKIES.includes(cookieName)) {
-        blocked = true;
-        blockReason = 'REQUIRED_COOKIE_MISSING';
-        return match;
-      } else {
-        return '';  // 可选 Cookie 缺失：替换为空（不保留占位符）
-      }
-    }
-    return encodeURIComponent(value);
-  });
-  return { url: finalUrl, blocked, reason: blockReason };
+const resolveValueByParamType = (param) => {
+  const resolver = PARAM_VALUE_RESOLVERS[param.paramType];
+  if (!resolver) {
+    return null;
+  }
+  return resolver();
 };
 
-// DD-V1.2 P2-6：params 字段语义明确
-// - 当 actionType 是 OPEN_URL/OPEN_IFRAME 等 URL 场景：params 仅用于回显或日志，URL 已包含全部参数（已 encode）
-// - 当 actionType 是 OPEN_COMPONENT_POPUP/DRAWER：params 作为 Vue 组件 props 传入，**不应 encode**
-const replaceCookieInComponentProps = (params) => {
+const buildParamsFromConfigs = (paramConfigs = []) => {
   const result = {};
-  for (const [k, v] of Object.entries(params)) {
-    if (typeof v === 'string') {
-      result[k] = v.replace(COOKIE_PATTERN, (m, n) => {
-        const val = getCookie(n);
-        return val ?? m;  // 组件 props 不 encode
-      });
-    } else {
-      result[k] = v;
+  for (const param of paramConfigs) {
+    const value = resolveValueByParamType(param);
+    if (value !== undefined && value !== null && value !== '') {
+      result[param.paramKey] = value;
     }
   }
   return result;
 };
 
+const appendParamsToUrl = (url, params) => {
+  const result = new URL(url, window.location.origin);
+  Object.entries(params).forEach(([key, value]) => {
+    result.searchParams.set(key, value);
+  });
+  return result.toString();
+};
+
 // 打开前替换
 const openWithReplacement = (directive) => {
+  const params = buildParamsFromConfigs(directive.action.paramConfigs);
   if (directive.action.actionType.startsWith('OPEN_URL') 
       || directive.action.actionType === 'OPEN_IFRAME'
       || directive.action.actionType === 'OPEN_NEW_WINDOW') {
     // URL 场景
-    const result = replaceCookiePlaceholdersInUrl(directive.action.url);
-    if (result.blocked) {
-      showError(`无法打开：${result.reason}`);
-      submitFeedback(directive, 'OPEN_BLOCKED', result.reason);
-      return;
-    }
-    executeOpen(directive.action.actionType, result.url, null);
+    const targetUrl = appendParamsToUrl(directive.action.url, params);
+    executeOpen(directive.action.actionType, targetUrl, null);
   } else if (directive.action.actionType.startsWith('OPEN_COMPONENT_')) {
     // 组件场景
-    const finalProps = replaceCookieInComponentProps(directive.action.params);
-    executeOpen(directive.action.actionType, null, finalProps);
+    executeOpen(directive.action.actionType, null, params);
   } else {
     // 路由场景
-    const result = replaceCookiePlaceholdersInUrl(directive.action.url);
-    if (result.blocked) {
-      showError(`无法打开：${result.reason}`);
-      return;
-    }
-    executeOpen(directive.action.actionType, result.url, null);
+    const targetUrl = appendParamsToUrl(directive.action.url, params);
+    executeOpen(directive.action.actionType, targetUrl, null);
   }
 };
 ```
@@ -2542,20 +2289,25 @@ window.addEventListener('callEnd', () => {
 
 ## 20. 复用存量表
 
-本期完全不动以下存量表的结构：
+本期完全不动以下存量表的结构。Copilot 配置不再写入菜单发布 CLOB，菜单表只在 action 显式关联 `menu_item_id` 时参与校验和运行时目标解析。
 
 | 表名 | 说明 |
 |------|------|
 | `cs_menu_item` | 核心菜单项（item_id 主键） |
-| `cs_menu_item_param` | 参数列表（含 13 个标准 param_type） |
+| `cs_menu_item_param` | 存量菜单参数列表；Copilot 纯 action 仅允许 4 个业务 `paramType` |
 | `cs_menu_item_info` | 悬浮信息（owner / tech 联系人） |
 | `cs_menu_group` | 分组 |
 | `cs_menu_module` | 模块 |
 | `cs_menu_module_item` | 模块-菜单项关联 |
 | `cs_menu_group_authority` | 分组权限（**仅用于配置后台权限**，不用于业务跳转权限校验） |
-| `cs_menu_version` | CLOB 配置快照表 |
+| `cs_menu_version` | 菜单发布 CLOB 快照表；Copilot 不写入 `copilotIndex`，也不从该表解析运行时配置 |
 
-新增表通过 `item_id` 关联到 `cs_menu_item`。
+Copilot 与菜单的关系：
+
+- `cs_copilot_action.menu_item_id` 可为空。为空时表示纯 Copilot action，跳转目标由 action 自身配置提供。
+- `cs_copilot_action.menu_item_id` 不为空时表示复用快捷导航菜单项。运行时指令只携带 `menuItemId`，由前端复用现有快捷导航打开逻辑；action 中的 item 快照只用于校验、审计和运营展示。
+- 不使用数据库外键。关联关系由配置发布校验和服务启动/刷新校验保证，避免 Copilot 配置表强绑定菜单表生命周期。
+- `cs_menu_version.config_data` 继续由菜单发布流程维护，Copilot 不修改该 JSON 结构。
 
 ---
 
@@ -2565,10 +2317,9 @@ window.addEventListener('callEnd', () => {
 
 ```mermaid
 erDiagram
-    cs_menu_item ||--o| cs_menu_item_copilot_ext : "Copilot 扩展"
-    cs_menu_item ||--o{ cs_menu_item_param : "参数(存量)"
-    cs_menu_item ||--o{ cs_copilot_intent_mapping : "意图映射"
-    cs_copilot_trigger_log ||--o{ cs_copilot_feedback_log : "反馈关联"
+    cs_menu_item ||..o{ cs_copilot_action : "可选关联，无外键"
+    cs_copilot_action ||..o{ cs_copilot_intent_mapping : "动作映射，无外键"
+    cs_copilot_trigger_log ||..o{ cs_copilot_feedback_log : "directive_id 关联"
 
     cs_menu_item {
         numeric item_id PK
@@ -2578,30 +2329,36 @@ erDiagram
         varchar enabled
     }
 
-    cs_menu_item_copilot_ext {
-        numeric item_id PK,FK
-        varchar copilot_enabled
-        varchar function_type_code
+    cs_copilot_action {
+        varchar version_id PK
+        varchar action_id PK
+        numeric menu_item_id
+        text item_snapshot_json
+        varchar action_name
+        bpchar enabled
         varchar function_path
         varchar target_kind
         varchar open_mode
         varchar route_path
-        varchar component_code
+        varchar target_url
         varchar ai_display_text
-        varchar floating_tip_text
         varchar risk_level
-        clob condition_rule
-        numeric mapping_priority
     }
 
     cs_copilot_intent_mapping {
+        varchar version_id PK
         varchar mapping_id PK
         varchar standard_intent_code
         varchar standard_intent_name
-        numeric item_id FK
+        varchar action_id
         numeric mapping_priority
-        clob condition_rule
         varchar enabled
+    }
+
+    cs_copilot_config_version {
+        varchar version_id PK
+        varchar publish_status
+        timestamp created_time
     }
 
     cs_copilot_trigger_log {
@@ -2609,7 +2366,8 @@ erDiagram
         varchar call_id
         varchar operator_id
         varchar intent_code
-        numeric item_id
+        varchar action_id
+        numeric menu_item_id
         varchar directive_id
     }
 
@@ -2618,110 +2376,96 @@ erDiagram
         varchar directive_id FK
         varchar call_id
         varchar feedback_type
+        varchar action_id
     }
 ```
 
-### 21.2 cs_menu_item_copilot_ext（Copilot 扩展表）
+### 21.2 cs_copilot_action（Copilot 动作配置表）
 
 #### 完整 DDL
 
 ```sql
-CREATE TABLE svccfg.cs_menu_item_copilot_ext (
-    -- ============= 关联键 =============
-    item_id                 numeric(131089,0) NOT NULL,
+CREATE TABLE svccfg.cs_copilot_action (
+    version_id              varchar(32) NOT NULL,
+    action_id               varchar(64) NOT NULL,
 
-    -- ============= 启用控制（DD-V1.1 简化为单字段） =============
-    copilot_enabled         bpchar(1) DEFAULT 'N' NOT NULL,
+    -- 可选快捷导航关联，不加外键
+    menu_item_id            numeric(20,0),
+    item_snapshot_json      text,
 
-    -- ============= 功能元信息 =============
-    function_type_code      varchar(32),
+    -- 动作基本信息
+    action_name             varchar(128) NOT NULL,
+    enabled                 char(1) DEFAULT 'Y' NOT NULL,
     function_path           varchar(256),
 
-    -- ============= 打开方式 =============
+    -- 打开方式；menu_item_id 为空时必填，关联菜单项时仅作为快照或可留空
     target_kind             varchar(16),
     open_mode               varchar(16),
+    target_url              varchar(512),
     route_path              varchar(256),
-    component_code          varchar(128),
-    component_name          varchar(128),
-    props_schema            clob,
-    fallback_url            varchar(512),
     window_feature          varchar(256),
 
-    -- ============= AI 展示 =============
-    ai_display_text         varchar(128),
+    -- AI 展示
+    ai_display_text         varchar(128) NOT NULL,
     floating_tip_text       varchar(256),
-    trigger_keywords        clob,
 
-    -- ============= 风险（人工指定，无自动派生） =============
-    risk_level              varchar(16) DEFAULT 'LOW',
+    -- 风险（人工指定，无自动派生）
+    risk_level              varchar(16) DEFAULT 'LOW' NOT NULL,
 
-    -- ============= 条件规则 =============
-    condition_rule          clob,
-
-    -- ============= UI =============
+    -- UI
     icon_url                varchar(256),
-    sort_order              numeric(8,0) DEFAULT 0,
 
-    -- ============= 审计 =============
-    created_by              varchar(16),
+    -- 非快捷导航动作的参数配置，JSON 数组，结构同 ItemParam
+    param_config_json       text,
+
+    -- 审计
+    created_by              varchar(32),
     created_name            varchar(40),
     created_time            timestamp,
-    updated_by              varchar(16),
+    updated_by              varchar(32),
     updated_name            varchar(40),
     updated_time            timestamp,
 
-    CONSTRAINT cs_menu_item_copilot_ext_pkey PRIMARY KEY (item_id),
-    CONSTRAINT cs_menu_item_copilot_ext_fk
-        FOREIGN KEY (item_id) REFERENCES svccfg.cs_menu_item(item_id)
+    CONSTRAINT cs_copilot_action_pkey PRIMARY KEY (version_id, action_id)
 );
 
-CREATE INDEX idx_copilot_ext_enabled
-    ON svccfg.cs_menu_item_copilot_ext(copilot_enabled);
+CREATE INDEX idx_copilot_action_version_enabled
+    ON svccfg.cs_copilot_action(version_id, enabled);
+
+CREATE INDEX idx_copilot_action_menu_item
+    ON svccfg.cs_copilot_action(version_id, menu_item_id);
 ```
 
 #### 字段说明
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| item_id | numeric(131089,0) | 是 | 关联 `cs_menu_item.item_id` |
-| copilot_enabled | bpchar(1) | 是 | Y/N，Copilot 是否启用，默认 N |
-| function_type_code | varchar(32) | 否 | SELF_DEVELOPED / CROSS_SYSTEM 等 |
+| version_id | varchar(32) | 是 | Copilot 配置版本号；action 行按版本快照化保存 |
+| action_id | varchar(64) | 是 | Copilot 动作主键，业务稳定 ID |
+| menu_item_id | numeric(20,0) | 否 | 可选关联 `cs_menu_item.item_id`，无外键 |
+| item_snapshot_json | text | 否 | 关联菜单项时的快照，用于校验、审计和运营展示，不作为运行时事实来源 |
+| action_name | varchar(128) | 是 | Copilot 动作名称 |
+| enabled | char(1) | 是 | Y/N |
 | function_path | varchar(256) | 否 | 运营标注的功能路径 |
-| target_kind | varchar(16) | 是（启用时） | URL / ROUTE / COMPONENT / IFRAME / NEW_WINDOW |
-| open_mode | varchar(16) | 是（启用时） | CURRENT_TAB / NEW_TAB / POPUP / DRAWER / WINDOW / IFRAME |
-| route_path | varchar(256) | target_kind=ROUTE 时填 | Vue 路由路径 |
-| component_code | varchar(128) | target_kind=COMPONENT 时填 | 组件唯一编码 |
-| component_name | varchar(128) | target_kind=COMPONENT 时填 | 组件显示名 |
-| props_schema | clob | 否 | 组件 Props JSON Schema |
-| fallback_url | varchar(512) | 否 | 组件加载失败时的兜底 URL |
-| window_feature | varchar(256) | target_kind=NEW_WINDOW 时填 | 新窗口特性 |
-| ai_display_text | varchar(128) | 启用时必填 | 浮窗 AI 展示文字 |
+| target_kind | varchar(16) | 条件必填 | `menu_item_id` 为空时必填；URL / ROUTE / IFRAME / NEW_WINDOW |
+| open_mode | varchar(16) | 条件必填 | `menu_item_id` 为空时必填；CURRENT_TAB / NEW_TAB / WINDOW / IFRAME |
+| target_url | varchar(512) | 条件必填 | `target_kind` 为 URL / IFRAME / NEW_WINDOW 时填 |
+| route_path | varchar(256) | 条件必填 | `target_kind` 为 ROUTE 时填 |
+| window_feature | varchar(256) | 否 | 新窗口特性 |
+| ai_display_text | varchar(128) | 是 | 浮窗 AI 展示文字 |
 | floating_tip_text | varchar(256) | 否 | 跳转前提示 |
-| trigger_keywords | clob | 否 | JSON 数组，关键词（运营检索 / 解释推荐用） |
 | risk_level | varchar(16) | 是 | LOW / MEDIUM / HIGH / DISABLED，默认 LOW |
-| condition_rule | clob | 否 | JSON Rule |
 | icon_url | varchar(256) | 否 | 图标 URL |
-| sort_order | numeric(8,0) | 否 | UI 排序 |
-| created_by / created_time | - | 是 | 审计 |
+| param_config_json | text | 否 | 纯 action 参数配置；后端透传到 `action.paramConfigs`，由前端按 `paramType` 取值；关联菜单项时不使用 |
+| created_by / created_name / created_time | - | 是 | 创建审计 |
+| updated_by / updated_name / updated_time | - | 否 | 更新审计 |
 
-> **DD-V1.2 调整 P1-10**：删除 `mapping_priority` 字段。
-> 原 DD-V1.1 中 `cs_menu_item_copilot_ext` 和 `cs_copilot_intent_mapping` 都有 `mapping_priority`，
-> 同一功能对不同意图的优先级应不同。
-> DD-V1.2 统一以 `cs_copilot_intent_mapping.mapping_priority` 为准。
-| updated_by / updated_time | - | 是 | 审计 |
+#### 关联菜单项时的取值规则
 
-#### 字段简化对照（相对 V3.3 评审稿）
-
-```
-✗ 删除：config_status（状态机 → 仅 enabled）
-✗ 删除：published_version_id（编辑态/发布态拆分 → 不做）
-✗ 删除：confirm_policy_override（由 risk_level 派生）
-✗ 删除：risk_level_source（自动派生 → 人工指定）
-✗ 删除：need_clarification / clarification_prompt（澄清不做）
-✗ 删除：entry_selector / entry_screenshot（二阶段才用）
-✗ 删除：display_color（UI 简化）
-✗ 删除：gray_policy_json（灰度不做）
-```
+- `menu_item_id` 为空：运行时使用 action 自身的 `target_kind/open_mode/target_url/route_path/param_config_json`。
+- `menu_item_id` 不为空：运行时指令只携带 `menuItemId` 和 `targetSource=MENU_ITEM`，由前端复用现有快捷导航打开逻辑；action 目标字段可留空，也可保存为快照，不能作为实际跳转事实来源。
+- `item_snapshot_json` 不为空时，发布校验需比较快照与当前菜单项是否一致。
+- action 与菜单项不加外键。菜单项删除、禁用、字段不一致由发布校验阻断；运行时刷新遇到异常配置时整版刷新失败并保留上一版快照。
 
 ### 21.3 cs_copilot_intent_mapping（意图映射表）
 
@@ -2729,60 +2473,93 @@ CREATE INDEX idx_copilot_ext_enabled
 
 ```sql
 CREATE TABLE svccfg.cs_copilot_intent_mapping (
+    version_id              varchar(32) NOT NULL,
     mapping_id              varchar(64) NOT NULL,
 
     -- AI 意图
     standard_intent_code    varchar(64) NOT NULL,
     standard_intent_name    varchar(256),
 
-    -- 关联功能
-    item_id                 numeric(131089,0) NOT NULL,
+    -- 关联 Copilot 动作，不加外键
+    action_id               varchar(64) NOT NULL,
 
     -- 优先级
     mapping_priority        numeric(5,0) DEFAULT 0,
 
-    -- 附加条件
-    condition_rule          clob,
-
     -- 启用
-    enabled                 bpchar(1) DEFAULT 'Y' NOT NULL,
+    enabled                 char(1) DEFAULT 'Y' NOT NULL,
 
     -- 审计
-    created_by              varchar(16),
+    created_by              varchar(32),
     created_name            varchar(40),
     created_time            timestamp,
-    updated_by              varchar(16),
+    updated_by              varchar(32),
     updated_name            varchar(40),
     updated_time            timestamp,
 
-    CONSTRAINT cs_copilot_intent_mapping_pkey PRIMARY KEY (mapping_id),
-    CONSTRAINT cs_copilot_intent_mapping_fk
-        FOREIGN KEY (item_id) REFERENCES svccfg.cs_menu_item(item_id),
-    CONSTRAINT uq_intent_item UNIQUE (standard_intent_code, item_id)
+    CONSTRAINT cs_copilot_intent_mapping_pkey PRIMARY KEY (version_id, mapping_id),
+    CONSTRAINT uq_intent_action UNIQUE (version_id, standard_intent_code, action_id)
 );
 
 CREATE INDEX idx_intent_mapping_intent
-    ON svccfg.cs_copilot_intent_mapping(standard_intent_code, enabled);
+    ON svccfg.cs_copilot_intent_mapping(version_id, standard_intent_code, enabled);
+
+CREATE INDEX idx_intent_mapping_action
+    ON svccfg.cs_copilot_intent_mapping(version_id, action_id);
 ```
 
 #### 字段说明
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
+| version_id | varchar(32) | 是 | Copilot 配置版本号；mapping 行按版本快照化保存 |
 | mapping_id | varchar(64) | 是 | UUID |
 | standard_intent_code | varchar(64) | 是 | AI 接口的 intentCode（字符串，如 INTENT_BILL_QUERY） |
 | standard_intent_name | varchar(256) | 否 | 意图名称（仅展示用） |
-| item_id | numeric(131089,0) | 是 | 关联 `cs_menu_item.item_id` |
+| action_id | varchar(64) | 是 | 关联同一 `version_id` 下的 `cs_copilot_action.action_id`，无外键 |
 | mapping_priority | numeric(5,0) | 否 | 同 intentCode 多候选优先级 |
-| condition_rule | clob | 否 | JSON Rule，附加条件 |
-| enabled | bpchar(1) | 是 | Y/N |
+| enabled | char(1) | 是 | Y/N |
 
-### 21.4 cs_copilot_trigger_log（触发日志表，DD-V1.2 大幅扩展）
+> `condition_rule` 已删除：本期不引入运行时 JSON Rule 评估，避免配置表达能力超出当前验证和测试能力。后续如果需要复杂条件，应作为独立规则引擎能力设计。
+
+### 21.4 cs_copilot_config_version（Copilot 配置版本表）
+
+#### 完整 DDL
+
+```sql
+CREATE TABLE svccfg.cs_copilot_config_version (
+    version_id              varchar(32) NOT NULL,
+    publish_status          varchar(16) DEFAULT 'PUBLISHED' NOT NULL,
+    change_summary          varchar(512),
+    created_by              varchar(32) NOT NULL,
+    created_name            varchar(40) NOT NULL,
+    created_time            timestamp NOT NULL,
+
+    CONSTRAINT cs_copilot_config_version_pkey PRIMARY KEY (version_id)
+);
+
+CREATE INDEX idx_copilot_config_version_time
+    ON svccfg.cs_copilot_config_version(publish_status, created_time);
+```
+
+#### 字段说明
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| version_id | varchar(32) | 是 | Copilot 配置版本号，独立于 `cs_menu_version.version_id` |
+| publish_status | varchar(16) | 是 | PUBLISHED / DISABLED，MVP 只使用 PUBLISHED |
+| change_summary | varchar(512) | 否 | 发布说明 |
+| created_by / created_name / created_time | - | 是 | 发布审计 |
+
+服务各 Pod 轮询该表最新 `version_id`。版本变化后按该 `version_id` 重新读取 action、intent mapping 以及必要的菜单项配置，并在本地构建不可变快照。发布流程应先写入同一 `version_id` 的 action/mapping 快照行，校验通过后最后插入 `cs_copilot_config_version` 的 PUBLISHED 行。
+
+### 21.5 cs_copilot_trigger_log（触发日志表）
 
 > **DD-V1.2 调整**：
 > - P0-6：directive_id 增加 UNIQUE 索引；增加 expire_at、directive_status
-> - P1-16：增加 result_status / reason_code / filter_stage / missing_params_json / asr_confidence / asr_text_hash
-> - P2-10：增加 ai_failure_reason 分类
+> - P1-16：保留 result_status / reason_code / filter_stage
+> - Action 化改造：记录 action_id / action_name，menu_item_id 可为空
+> - 删除 ai_request_id / ai_response_time_ms / ai_failure_reason / missing_params_json / asr_confidence / asr_text_hash
 > - P2-2：operator_id 长度从 varchar(16) 改为 varchar(32)
 
 #### 完整 DDL
@@ -2801,34 +2578,24 @@ CREATE TABLE svccfg.cs_copilot_trigger_log (
     intent_name             varchar(256),
 
     -- 匹配结果
-    item_id                 numeric(131089,0),
-    item_name               varchar(255),
+    action_id               varchar(64),
+    action_name             varchar(128),
+    menu_item_id            numeric(20,0),
     candidate_count         numeric(5,0),
 
     -- 推荐策略
     risk_level              varchar(16),
     directive_id            varchar(64),
     expire_at               timestamp,                    -- DD-V1.2 P0-6 指令过期时间
-    directive_status        varchar(16),                  -- DD-V1.2 P0-6 PUSHED/EXPIRED/CONSUMED
+    directive_status        varchar(16),                  -- DD-V1.2 P0-6 PUBLISHED/EXPIRED/CONSUMED/DELIVERED
 
-    -- AI 调用情况
-    ai_request_id           varchar(64),
-    ai_response_time_ms     numeric(8,0),
-    ai_success              bpchar(1),
-    ai_failure_reason       varchar(64),                  -- DD-V1.2 P2-10 失败分类
-
-    -- 业务结果（DD-V1.2 P1-16）
+    -- 业务结果
     result_status           varchar(32),                  -- SUCCESS/FAIL/FILTERED
     reason_code             varchar(64),                  -- 原因编码
     filter_stage            varchar(32),                  -- 过滤阶段
-    missing_params_json     clob,                          -- 参数缺失情况
-
-    -- ASR 相关（DD-V1.2 P1-16）
-    asr_confidence          numeric(5,4),                  -- ASR 平均置信度
-    asr_text_hash           varchar(64),                  -- ASR 文本哈希（不存原文）
 
     -- 通用
-    trigger_time            timestamp,
+    trigger_time            timestamp NOT NULL,
     config_version          varchar(32),
 
     CONSTRAINT cs_copilot_trigger_log_pkey PRIMARY KEY (log_id)
@@ -2842,6 +2609,8 @@ CREATE UNIQUE INDEX uq_trigger_log_directive
 CREATE INDEX idx_trigger_log_call ON svccfg.cs_copilot_trigger_log(call_id);
 CREATE INDEX idx_trigger_log_intent
     ON svccfg.cs_copilot_trigger_log(intent_code, trigger_time);
+CREATE INDEX idx_trigger_log_action
+    ON svccfg.cs_copilot_trigger_log(action_id, trigger_time);
 CREATE INDEX idx_trigger_log_time ON svccfg.cs_copilot_trigger_log(trigger_time);
 CREATE INDEX idx_trigger_log_result
     ON svccfg.cs_copilot_trigger_log(result_status, reason_code, trigger_time);
@@ -2857,33 +2626,28 @@ CREATE INDEX idx_trigger_log_result
 | customer_id | varchar(64) | 否 | 客户号（DD-V1.2 P2-3 标注：含敏感等级，不脱敏 - F05 待实现）|
 | intent_code | varchar(64) | 否 | AI 返回的意图代码 |
 | intent_name | varchar(256) | 否 | 意图名称 |
-| item_id | numeric(131089,0) | 否 | 匹配的功能 ID（NULL=无映射） |
-| item_name | varchar(255) | 否 | 功能名称 |
+| action_id | varchar(64) | 否 | 匹配的 Copilot action ID |
+| action_name | varchar(128) | 否 | Copilot 动作名称 |
+| menu_item_id | numeric(20,0) | 否 | 可选关联菜单项 |
 | candidate_count | numeric(5,0) | 否 | 候选总数 |
 | risk_level | varchar(16) | 否 | LOW/MEDIUM/HIGH |
 | directive_id | varchar(64) | 否 | 指令 ID（UNIQUE 索引 P0-6） |
 | expire_at | timestamp | 否 | **DD-V1.2 P0-6** 指令过期时间，反馈时校验 |
-| directive_status | varchar(16) | 否 | **DD-V1.2 P0-6** PUSHED/EXPIRED/CONSUMED |
-| ai_request_id | varchar(64) | 否 | AI 请求 ID |
-| ai_response_time_ms | numeric(8,0) | 否 | AI 响应耗时（毫秒） |
-| ai_success | bpchar(1) | 否 | Y/N |
-| ai_failure_reason | varchar(64) | 否 | **DD-V1.2 P2-10** TIMEOUT/HTTP_5XX/RESP_CODE_ERROR/JSON_PARSE_ERROR/EMPTY_INTENT |
+| directive_status | varchar(16) | 否 | **DD-V1.2 P0-6** PUBLISHED/EXPIRED/CONSUMED/DELIVERED；DELIVERED 为前端 ACK 后状态，本期预留 |
 | result_status | varchar(32) | 否 | **DD-V1.2 P1-16** SUCCESS/FAIL/FILTERED |
 | reason_code | varchar(64) | 否 | **DD-V1.2 P1-16** 详见 reason_code 枚举 |
 | filter_stage | varchar(32) | 否 | **DD-V1.2 P1-16** 过滤发生的阶段 |
-| missing_params_json | clob | 否 | **DD-V1.2 P1-16** JSON 数组，参数缺失列表 |
-| asr_confidence | numeric(5,4) | 否 | **DD-V1.2 P1-16** ASR 平均置信度 |
-| asr_text_hash | varchar(64) | 否 | **DD-V1.2 P1-16** ASR 文本哈希，不存原文 |
 | trigger_time | timestamp | 是 | 触发时间 |
 | config_version | varchar(32) | 否 | 配置版本号 |
 
-### 21.5 cs_copilot_feedback_log（反馈日志表，DD-V1.2 调整）
+### 21.6 cs_copilot_feedback_log（反馈日志表，DD-V1.2 调整）
 
 > **DD-V1.2 调整**：
 > - P1-14：增加 is_effective 字段（首次反馈为 Y，后续重复为 N）
 > - P1-15：trigger_log_id 由后端反查 directive_id 填充（不再依赖前端传值）
 > - P2-2：operator_id 长度调整为 varchar(32)
-> - P2-10：增加 frontend_reason（前端反馈附加原因，如 EXPIRED/PERMISSION_FILTERED 等）
+> - Action 化改造：记录 action_id，menu_item_id 可为空
+> - 删除 frontend_reason，反馈原因统一通过 feedback_type 和服务端 trigger_log 状态表达
 
 #### 完整 DDL
 
@@ -2897,21 +2661,21 @@ CREATE TABLE svccfg.cs_copilot_feedback_log (
 
     -- 上下文
     call_id                 varchar(64) NOT NULL,
-    operator_id             varchar(32),                  -- DD-V1.2 P2-2 长度调整
+    operator_id             varchar(32) NOT NULL,         -- DD-V1.2 P2-2 长度调整
 
     -- 反馈内容
     feedback_type           varchar(32) NOT NULL,
     intent_code             varchar(64),
-    item_id                 numeric(131089,0),
-    frontend_reason         varchar(64),                  -- DD-V1.2 P2-10 前端附加原因
+    action_id               varchar(64),
+    menu_item_id            numeric(20,0),
 
     -- 幂等控制（DD-V1.2 P1-14）
-    is_effective            bpchar(1) DEFAULT 'Y' NOT NULL,
+    is_effective            char(1) DEFAULT 'Y' NOT NULL,
                             -- Y: 首次有效反馈，影响业务状态
                             -- N: 重复反馈，仅记录不影响
 
     -- 时间
-    feedback_time           timestamp,
+    feedback_time           timestamp NOT NULL,
 
     CONSTRAINT cs_copilot_feedback_log_pkey PRIMARY KEY (log_id)
 );
@@ -2922,9 +2686,14 @@ CREATE INDEX idx_feedback_log_time
     ON svccfg.cs_copilot_feedback_log(feedback_time);
 CREATE INDEX idx_feedback_log_call
     ON svccfg.cs_copilot_feedback_log(call_id);
+CREATE INDEX idx_feedback_log_action
+    ON svccfg.cs_copilot_feedback_log(action_id);
 -- DD-V1.2 P1-14：有效反馈快速查询
 CREATE INDEX idx_feedback_log_effective
     ON svccfg.cs_copilot_feedback_log(directive_id, is_effective);
+CREATE UNIQUE INDEX uq_feedback_log_effective_directive
+    ON svccfg.cs_copilot_feedback_log(directive_id)
+    WHERE is_effective = 'Y';
 ```
 
 #### 字段说明
@@ -2935,180 +2704,128 @@ CREATE INDEX idx_feedback_log_effective
 | directive_id | varchar(64) | 是 | 来自指令推送 |
 | trigger_log_id | varchar(64) | 否 | **DD-V1.2 P1-15** 后端通过 directive_id 反查填充 |
 | call_id | varchar(64) | 是 | 通话 ID |
-| operator_id | varchar(32) | 否 | 坐席工号（DD-V1.2 P2-2 长度调整） |
+| operator_id | varchar(32) | 是 | 坐席工号（DD-V1.2 P2-2 长度调整） |
 | feedback_type | varchar(32) | 是 | ACCEPTED / IGNORED / WRONG_INTENT / WRONG_FUNCTION |
 | intent_code | varchar(64) | 否 | 意图代码 |
-| item_id | numeric(131089,0) | 否 | 功能 ID |
-| frontend_reason | varchar(64) | 否 | **DD-V1.2 P2-10** 前端反馈附加原因 |
-| is_effective | bpchar(1) | 是 | **DD-V1.2 P1-14** Y=首次有效 / N=重复 |
+| action_id | varchar(64) | 否 | Copilot action ID |
+| menu_item_id | numeric(20,0) | 否 | 可选关联菜单项 |
+| is_effective | char(1) | 是 | **DD-V1.2 P1-14** Y=首次有效 / N=重复 |
 | feedback_time | timestamp | 是 | 反馈时间 |
 
 ---
 
-## 22. CLOB 结构扩展（M12）
+## 22. Copilot 配置加载与菜单校验
 
-按你的指示**方案 B**：扩展存量发布逻辑，把 Copilot 字段嵌入 CLOB。这是本期需要改动的存量代码。
+本期不扩展 `cs_menu_version.config_data`。Copilot Service 从独立配置表构建运行时快照，菜单配置只在 action 关联 `menu_item_id` 时读取。
 
 ### 22.1 改动范围
 
 ```
-存量代码改动位置：菜单管理后台"一键发布"逻辑
-改动内容：生成 CLOB 时，关联读取
-  - cs_menu_item_copilot_ext
-  - cs_copilot_intent_mapping
-把 Copilot 字段嵌入 items 节点。
+存量菜单发布流程：不改
+cs_menu_version.config_data：不新增 copilotExt / copilotIndex
 
-代码改动量：约 50-100 行 Java 代码（具体取决于现有发布逻辑结构）
-风险：低（仅在 items 节点新增字段，不修改原有字段）
+Copilot 配置来源：
+  - cs_copilot_config_version
+  - cs_copilot_action
+  - cs_copilot_intent_mapping
+  - cs_menu_item（仅 menu_item_id 不为空时读取，用于存在性、启用状态和快照一致性校验）
+
+运行时缓存：
+  - 各 Pod 本地持有不可变 CopilotConfigSnapshot
+  - 通过 cs_copilot_config_version.version_id 判断是否刷新，并按该 version_id 读取 action/mapping 快照行
 ```
 
-### 22.2 扩展后的 CLOB 结构
+### 22.2 运行时快照结构
+
+该结构只存在于 `copilot-service` 内存，不写入 `cs_menu_version.config_data`。
 
 ```json
 {
-  "version": "20260424.001",
-  "configBuildTime": "2026-04-24T15:30:00Z",
-
-  "groups": [
-    {
-      "groupId": 1001,
-      "groupName": "信用卡服务",
-      "modules": [
-        {
-          "moduleId": 2001,
-          "moduleName": "境外服务",
-          "items": [
-            {
-              "itemId": 12345,
-              "itemName": "行程报备登记",
-              "url": "https://...",
-              "sysFlag": "FITS",
-              "pageId": "FRCS1029",
-              "params": [
-                { "paramType": "CUST_NO", "paramKey": "custNo", "paramValue": null },
-                { "paramType": "COOKIE_PLACEHOLDER", "paramKey": "token", "paramValue": "token" }
-              ],
-              "info": { "ownerName": "...", "techName": "..." },
-
-              "copilotExt": {
-                "enabled": true,
-                "functionTypeCode": "CROSS_SYSTEM",
-                "functionPath": "信用卡风险侦测系统-参数设置-行程报备登记",
-                "targetKind": "IFRAME",
-                "openMode": "IFRAME",
-                "aiDisplayText": "境外行程报备",
-                "floatingTipText": "您正离开信用卡客服系统...",
-                "triggerKeywords": ["出境", "境外", "旅游"],
-                "riskLevel": "MEDIUM",
-                "iconUrl": "icons/travel.png",
-                "mappingPriority": 10
-              }
-            }
-          ]
-        }
-      ]
-    }
-  ],
-
-  "copilotIndex": {
-    "intentToItems": {
-      "INTENT_TRAVEL_DECLARE": [
-        { "itemId": 12345, "priority": 10 }
-      ]
-    },
-    "itemById": {
-      "12345": {
-        "itemId": 12345,
-        "itemName": "行程报备登记",
-        "url": "https://...",
-        "sysFlag": "FITS",
-        "copilotEnabled": true,
-        "riskLevel": "MEDIUM",
-        "targetKind": "IFRAME",
-        "openMode": "IFRAME",
-        "params": [...],
-        "copilotExt": {...}
-      }
+  "versionId": "202605130001",
+  "buildTime": "2026-05-13T10:00:00",
+  "intentToActions": {
+    "INTENT_TRAVEL_DECLARE": [
+      { "actionId": "act_travel_declare", "priority": 10 }
+    ]
+  },
+  "actionById": {
+    "act_travel_declare": {
+      "actionId": "act_travel_declare",
+      "actionName": "境外行程报备",
+      "menuItemId": 12345,
+      "targetSource": "MENU_ITEM",
+      "enabled": true,
+      "riskLevel": "MEDIUM",
+      "aiDisplayText": "境外行程报备"
     }
   }
 }
 ```
 
-### 22.3 CLOB 生成流程
+`targetSource` 取值：
+
+| 值 | 含义 |
+|----|------|
+| ACTION | 纯 Copilot action，目标从 `cs_copilot_action` 读取 |
+| MENU_ITEM | 关联快捷导航菜单项，前端根据 `menuItemId` 调用现有快捷导航打开逻辑 |
+
+### 22.3 配置刷新流程
 
 ```mermaid
 flowchart TD
-    A[运营点击一键发布] --> B[读取存量表]
-    B --> C[读取 cs_menu_item_copilot_ext<br/>WHERE copilot_enabled=Y]
-    C --> D[读取 cs_copilot_intent_mapping<br/>WHERE enabled=Y]
-    D --> E[装配 groups/modules/items 树]
-    E --> F[嵌入 copilotExt 到 item 节点]
-    F --> G[计算 copilotIndex 反向索引]
-    G --> H[序列化 JSON]
-    H --> I[INSERT cs_menu_version]
-    I --> J[Admin 通知 Copilot Service 刷新]
+    A[Pod 定时轮询] --> B[查询 cs_copilot_config_version 最新 version_id]
+    B --> C{version_id 是否变化}
+    C -- 否 --> D[继续使用本地快照]
+    C -- 是 --> E[按 version_id 读取启用的 cs_copilot_action]
+    E --> F[按 version_id 读取启用的 cs_copilot_intent_mapping]
+    F --> G[按需读取 cs_menu_item]
+    G --> H[执行配置校验]
+    H --> I{校验是否通过}
+    I -- 是 --> J[构建并替换本地 CopilotConfigSnapshot]
+    I -- 否 --> K[保留旧快照并告警]
 ```
 
-### 22.4 关键代码改动点
+### 22.4 取值规则
 
-```java
-@Service
-public class MenuVersionPublishService {  // 存量类
+| 场景 | 运行时目标来源 | 参数来源 | action 目标字段用途 |
+|------|---------------|----------|--------------------|
+| `menu_item_id` 为空 | `cs_copilot_action` | `param_config_json` 透传为 `action.paramConfigs`，前端取值 | 必填，作为事实来源 |
+| `menu_item_id` 不为空 | 前端现有快捷导航逻辑 | 快捷导航既有逻辑 | 可为空或作为快照，不作为事实来源 |
 
-    // === 本期新增依赖 ===
-    @Autowired private CopilotExtDao copilotExtDao;
-    @Autowired private CopilotIntentMappingDao mappingDao;
+关联菜单项时，前端指令只携带 `menuItemId`，由前端复用现有快捷导航打开逻辑。服务端不把 `cs_menu_item.url/page_id/page_title/sys_flag` 翻译成 Copilot 跳转字段。
 
-    public String publishNewVersion(String operatorId) {
-        // 1. 加载存量数据（不变）
-        List<MenuGroup> groups = menuItemDao.loadGroups();
+### 22.5 校验规则
 
-        // 2. === 本期新增：加载 Copilot 数据 ===
-        Map<Long, CopilotExt> extMap = copilotExtDao.loadAllEnabled().stream()
-            .collect(Collectors.toMap(CopilotExt::getItemId, Function.identity()));
-        Map<Long, List<IntentMapping>> mappingMap = mappingDao.loadAllEnabled()
-            .stream().collect(Collectors.groupingBy(IntentMapping::getItemId));
+发布校验和服务刷新校验应保持一致：
 
-        // 3. 装配 items 节点
-        for (MenuItem item : items) {
-            ItemNode node = buildExistingItemNode(item);  // 存量逻辑
+| 校验项 | 纯 action | 关联 item 的 action |
+|--------|-----------|---------------------|
+| 版本内容 | 同一 `version_id` 下至少存在 1 个启用 action 和 1 个启用 mapping | 同左 |
+| action 启用状态 | `enabled='Y'` | `enabled='Y'` |
+| 意图映射 | mapping 必须引用存在且启用的 action | 同左 |
+| 目标字段 | `target_kind/open_mode` 必填，并校验组合合法 | 不要求 action 目标字段必填 |
+| URL 白名单 | URL / IFRAME / NEW_WINDOW 必须命中白名单 | 不校验，沿用现有快捷导航打开链路 |
+| 菜单项存在性 | 不校验 | `cs_menu_item.item_id` 必须存在 |
+| 菜单项启用状态 | 不校验 | `cs_menu_item.enabled` 必须为 `Y` |
+| 快照一致性 | 不校验 | `item_snapshot_json` 不为空时比较 itemName/url/sysFlag/pageId/pageTitle/enabled |
+| 参数来源 | 校验 `param_config_json` 格式、`paramType` 仅允许 CUST_NO / CUST_ID_NO / MOBPHN1 / ACCOUNT_NO；不校验实际客户值 | 不校验，沿用现有快捷导航打开链路 |
 
-            // === 本期新增：嵌入 Copilot 字段 ===
-            CopilotExt ext = extMap.get(item.getItemId());
-            if (ext != null) {
-                node.setCopilotExt(toCopilotExtNode(ext));
-            }
-        }
+校验失败策略：
 
-        // 4. === 本期新增：计算反向索引 ===
-        Map<String, List<ItemReference>> intentToItems =
-            computeIntentIndex(mappingMap);
-        Map<Long, ItemSummary> itemById =
-            computeItemByIdIndex(items, extMap);
+- 配置后台发布时：阻断发布，返回具体错误。
+- 服务运行时刷新时：保留上一版有效快照；如果只存在少量失效 action，可按配置决定整版失败或跳过失效 action。MVP 建议整版失败，避免各 Pod 看到不同候选集。
 
-        // 5. 装配 CLOB（新增 copilotIndex 字段）
-        MenuVersionData data = MenuVersionData.builder()
-            .version(generateVersion())
-            .groups(groups)
-            .copilotIndex(CopilotIndex.builder()
-                .intentToItems(intentToItems)
-                .itemById(itemById)
-                .build())
-            .build();
+### 22.6 已确认问题
 
-        // 6. 写入（存量逻辑）
-        return menuVersionDao.insert(JSON.toJSONString(data), operatorId);
-    }
-}
-```
-
-### 22.5 兼容性
-
-| 兼容性维度 | 说明 |
-|-----------|------|
-| 未启用 Copilot 的功能 | `copilotExt` 字段为 null，前端跳转流程不变 |
-| 现有前端代码 | 可选择忽略 `copilotExt` 和 `copilotIndex` 字段（向前兼容） |
-| 存量发布流程 | 字段嵌入位置仅在 items 节点，不修改原有字段 |
+| 编号 | 问题 | 决策 |
+|------|------|------|
+| C1 | 前端是否支持仅凭 `menuItemId` 调用现有快捷导航打开逻辑？ | 已确认支持 |
+| C2 | `cs_menu_item.enabled` 的真实启用值是什么？ | 已确认启用值为 `Y` |
+| C3 | `item_snapshot_json` 是否必填？ | **MVP 非必填**；非空时必须做快照一致性校验（已实现于 MybatisCopilotConfigRepository.validateSnapshot） |
+| C4 | 菜单项变化后是否自动触发 Copilot 版本发布? | **手工触发**，不做自动联动；自动联动改造较大，列为 F16 后续待实现 |
+| C5 | 运行时单 action 关联 item 失效时整版失败还是跳过？ | **整版失败**，与当前 `MybatisCopilotConfigRepository` 实现一致 |
+| C6 | 纯 action 的 `target_kind/open_mode` 是否允许扩展 COMPONENT/POPUP/DRAWER？ | **本期严格限制四种**：URL / ROUTE / IFRAME / NEW_WINDOW；配置后台校验拒绝其他值（已实现于 CopilotConfigValidationServiceImpl.validateActionCombination） |
+| C7 | 纯 action 没有 `menuItemId` 时业务权限如何判断？ | **复用 URL 白名单 + 灰度白名单**，前端不做 menuItemId 权限校验；记录为已知风险（§2.3） |
 
 ---
 
@@ -3154,8 +2871,9 @@ public class MenuVersionPublishService {  // 存量类
   },
 
   "function": {
-    "itemId": 12345,
-    "itemName": "行程报备登记",
+    "actionId": "act_travel_declare",
+    "actionName": "境外行程报备",
+    "menuItemId": 12345,
     "functionPath": "信用卡风险侦测系统-参数设置-行程报备登记"
   },
 
@@ -3166,14 +2884,8 @@ public class MenuVersionPublishService {  // 存量类
   },
 
   "action": {
-    "targetKind": "IFRAME",
-    "openMode": "IFRAME",
-    "actionType": "OPEN_IFRAME",
-    "url": "https://frdctrfront.paasuat.cmbchina.cn/page?custNo=C20120315000123&token=${COOKIE.token}",
-    "params": {
-      "custNo": "C20120315000123",
-      "token": "${COOKIE.token}"
-    }
+    "targetSource": "MENU_ITEM",
+    "actionType": "OPEN_MENU_ITEM"
   },
 
   "risk": {
@@ -3195,17 +2907,20 @@ public class MenuVersionPublishService {  // 存量类
 | expireAt | string | 是 | ISO 8601 时间，前端校验过期不执行 |
 | intent.intentCode | string | 是 | AI 返回的意图代码 |
 | intent.intentName | string | 是 | 意图名称 |
-| function.itemId | number | 是 | 功能 ID（前端权限校验用） |
-| function.itemName | string | 是 | 功能名称 |
+| function.actionId | string | 是 | Copilot action ID |
+| function.actionName | string | 是 | Copilot 动作名称 |
+| function.menuItemId | number | 否 | 关联菜单项；为空表示纯 action |
 | function.functionPath | string | 否 | 功能路径（用于卡片展示） |
 | display.title | string | 是 | 卡片标题 |
 | display.tip | string | 否 | 跳转前提示 |
 | display.iconUrl | string | 否 | 图标 URL |
-| action.targetKind | string | 是 | URL/ROUTE/COMPONENT/IFRAME/NEW_WINDOW |
-| action.openMode | string | 是 | CURRENT_TAB/NEW_TAB/POPUP/DRAWER/WINDOW/IFRAME |
-| action.actionType | string | 是 | 派生字段，前端按此选择执行器 |
-| action.url | string | 否 | 含 `${COOKIE.xxx}` 占位符的 URL |
-| action.params | object | 否 | 参数 map（值含 `${COOKIE.xxx}`） |
+| action.targetSource | string | 是 | ACTION / MENU_ITEM |
+| action.targetKind | string | 条件必填 | ACTION 场景必填；URL/ROUTE/IFRAME/NEW_WINDOW |
+| action.openMode | string | 条件必填 | ACTION 场景必填；CURRENT_TAB/NEW_TAB/WINDOW/IFRAME |
+| action.actionType | string | 是 | 派生字段，前端按此选择执行器；MENU_ITEM 场景为 OPEN_MENU_ITEM |
+| action.url | string | 否 | 目标基础 URL / routePath；纯 action 不在后端拼接客户参数 |
+| action.params | object | 否 | 后端已解析参数 map，纯 action 通常为空，保留兼容 |
+| action.paramConfigs | array | 否 | 纯 action 参数配置透传，前端按 `paramType` 取值并按 `paramKey` 拼接 |
 | risk.riskLevel | string | 是 | LOW/MEDIUM/HIGH |
 | risk.needConfirm | boolean | 是 | 派生：MEDIUM/HIGH 时为 true |
 
@@ -3238,7 +2953,8 @@ Authorization: Bearer {token}
   "feedbackType": "ACCEPTED",
   "intentCode": "INTENT_TRAVEL_DECLARE",
   "intentName": "境外行程报备",
-  "itemId": 12345,
+  "actionId": "act_travel_declare",
+  "menuItemId": 12345,
   "feedbackTime": "2026-04-24T10:01:15.000Z"
 }
 ```
@@ -3253,7 +2969,8 @@ Authorization: Bearer {token}
 | feedbackType | string | 是 | ACCEPTED / IGNORED / WRONG_INTENT / WRONG_FUNCTION |
 | intentCode | string | 是 | 推送时的 intentCode |
 | intentName | string | 否 | 意图名称 |
-| itemId | number | 是 | 功能 ID |
+| actionId | string | 是 | Copilot action ID |
+| menuItemId | number | 否 | 关联菜单项 |
 | feedbackTime | string | 是 | ISO 8601 时间 |
 
 ### 25.3 响应
@@ -3304,6 +3021,15 @@ POST /copilot/session/bind
   "operatorId": "ho212121",
   "customerId": "C20120315000123",
   "customerType": "VIP3",
+  "idNo": "110101199001011234",
+  "noIdType": "N",
+  "palmLifeUserId": "PLU10001",
+  "phoneNo": "013812345678",
+  "phoneNoNoZero": "13812345678",
+  "accountNo": "6225881234567890",
+  "address": "深圳市南山区科技园",
+  "addressEncode": "%E6%B7%B1%E5%9C%B3%E5%B8%82%E5%8D%97%E5%B1%B1%E5%8C%BA%E7%A7%91%E6%8A%80%E5%9B%AD",
+  "calledNumber": "95555",
   "sessionStartTime": "2026-04-24T10:00:00.000Z"
 }
 ```
@@ -3316,6 +3042,15 @@ POST /copilot/session/bind
 | operatorId | string | 是 | 坐席工号 |
 | customerId | string | 否 | 客户号（来电弹屏获取） |
 | customerType | string | 否 | 客户类型 |
+| idNo | string | 否 | 证件号，对应 `CUST_ID_NO` |
+| noIdType | string | 否 | 无证件类型标识；本期纯 action 不配置该参数 |
+| palmLifeUserId | string | 否 | 掌上生活用户 ID |
+| phoneNo | string | 否 | 预留手机号一，对应 `MOBPHN1` |
+| phoneNoNoZero | string | 否 | 预留手机号一去 0；本期纯 action 不配置该参数 |
+| accountNo | string | 否 | 主账户号，对应 `ACCOUNT_NO` |
+| address | string | 否 | 地址；本期纯 action 不配置该参数 |
+| addressEncode | string | 否 | 编码地址；本期纯 action 不配置该参数 |
+| calledNumber | string | 否 | 进线号码；本期纯 action 不配置该参数 |
 | sessionStartTime | string | 否 | 通话开始时间 |
 
 响应：
@@ -3336,7 +3071,22 @@ POST /copilot/session/unbind
 { "callId": "CALL_202604240001" }
 ```
 
-调用时机：通话结束时由前端调用，触发清理对话历史、executedSteps、callSession、防抖 timer 等。
+调用时机：通话结束时由前端调用。
+
+受行内 Redis 使用规范约束，本接口不主动删除 Redis key。实际行为是触发通话结束钩子：
+
+- M02 SentenceMerger 写入 cleanup marker，使已排队但未触发的防抖任务 claim 失败，避免 unbind 后继续调用 AI
+- M03 对话历史、M04 callSession、M06 executedSteps、M11 静默列表不主动删除，依赖 TTL 自动过期
+
+TTL 口径：
+
+| 状态 | TTL / 失效策略 |
+|------|----------------|
+| 防抖状态 | unbind 写 cleanup marker，marker 10 分钟后自动过期 |
+| 对话历史 | 1 小时 TTL |
+| callSession | 30 分钟 TTL |
+| executedSteps | 1 小时 TTL |
+| 静默列表 | 2 小时 TTL |
 
 ---
 
@@ -3357,11 +3107,22 @@ Authorization: Bearer {admin-token}
   "currentVersion": "20260424.001",
   "loadTimeMs": 145,
   "intentMappingCount": 87,
-  "copilotEnabledItemCount": 32
+  "copilotEnabledActionCount": 32
 }
 ```
 
-### 27.2 健康检查
+### 27.2 配置校验
+
+```
+POST /copilot/admin/config/validate?versionId=202605130001
+Authorization: Bearer {admin-token}
+```
+
+校验指定 `version_id` 的数据库快照：读取同版本 action/mapping，按需校验 `cs_menu_item` 存在、启用和快照一致性，并校验纯 action 的 URL/参数配置。配置后台发布时应先写 action/mapping 快照行，调用该接口通过后，再插入 `cs_copilot_config_version` 的 PUBLISHED 行。
+
+若不传 `versionId` 且请求体传入 `CopilotConfigSnapshot`，则保留旧的内存快照校验能力，仅用于本地调试，不作为发布校验事实来源。
+
+### 27.3 健康检查
 
 ```
 GET /copilot/health
@@ -3463,21 +3224,30 @@ Content-Type: application/json
 |------|------|
 | COP_INTENT_NOT_MAPPED | AI 返回的 intentCode 在映射表中找不到 |
 | COP_RISK_DISABLED | 风险等级 DISABLED，不展示 |
-| COP_PARAM_MISSING | 必填参数缺失 |
+| COP_PARAM_MISSING | 前端打开阶段发现必填参数缺失；后端纯 action 不因客户参数缺失阻断指令 |
 | COP_URL_VALIDATION_FAIL | URL 白名单校验失败 |
 | COP_AI_TIMEOUT | AI 接口超时 |
 | COP_AI_FAILED | AI 接口业务失败 |
 | COP_CONFIG_VERSION_STALE | 配置版本不一致 |
+| COP_MENU_ITEM_NOT_FOUND | 菜单项不存在（关联 menu_item_id 校验失败） |
+| COP_MENU_ITEM_DISABLED | 菜单项已禁用 |
+| COP_SNAPSHOT_MISMATCH | 菜单项快照与当前菜单项不一致 |
+| COP_DIRECTIVE_NOT_FOUND | 反馈对应的指令不存在（trigger_log 查不到） |
+| COP_DIRECTIVE_EXPIRED | 指令已过期 |
+| COP_FEEDBACK_CONTEXT_MISMATCH | 反馈上下文与指令记录不一致（callId/operatorId/intentCode/actionId） |
+| COP_FEEDBACK_DUPLICATE | 反馈已被首次处理（重复反馈，仅记录不影响业务状态） |
+| COP_ADMIN_TOKEN_INVALID | Admin 接口鉴权失败 |
 
 ### 29.3 错误响应示例
 
 ```json
 {
-  "code": "COP_PARAM_MISSING",
-  "message": "Required parameter missing: custNo",
+  "code": "COP_URL_VALIDATION_FAIL",
+  "message": "Target URL domain not allowed",
   "details": {
-    "itemId": 12345,
-    "missingParams": ["custNo"]
+    "actionId": "act_travel_declare",
+    "menuItemId": 12345,
+    "domain": "example.com"
   }
 }
 ```
@@ -3516,12 +3286,12 @@ sequenceDiagram
     SVC->>AI: Feign POST getSopResult.json (仅客户消息)
     AI-->>SVC: { intentCode, intentName }
 
-    SVC->>CFG: M07 查询 intentToItems
+    SVC->>CFG: M07 查询 intentToActions
     CFG-->>SVC: List ItemCandidate
-    SVC->>SVC: 评估 condition_rule + 静默列表
+    SVC->>SVC: 过滤禁用 action + 静默列表
     SVC->>SVC: 取最高优先级
-    SVC->>SVC: M08 解析参数(含 Cookie 占位符)
-    SVC->>SVC: M09 拼接 URL + 构建 DirectiveDTO
+    SVC->>SVC: M08 选择候选 action
+    SVC->>SVC: M09 透传 paramConfigs + 构建 DirectiveDTO
     SVC->>WS: M10 推送指令
     SVC->>SVC: M16 触发日志埋点
 
@@ -3534,17 +3304,17 @@ sequenceDiagram
 
     Note over OP: 坐席点击"打开"
     OP->>FE: click
-    FE->>FE: M14-5 Cookie 占位符替换
+    FE->>FE: M14-5 按 paramType 从 Cookie/工作台上下文取值
+    FE->>FE: 按 paramKey 拼接 URL 或组件 props
     FE->>FE: M15 执行 5 种打开方式之一
     FE->>SVC: POST /copilot/feedback (ACCEPTED)
-    SVC->>SVC: 持久化反馈日志
-    SVC->>SVC: 追加 executedSteps
-    SVC->>SVC: M16 反馈日志埋点
+    SVC->>ES: Best-effort 写入反馈结果
+    SVC-->>FE: RECORDED
 
     Note over OP: 通话结束
     FE->>SVC: POST /copilot/session/unbind
-    SVC->>Redis: 清理对话历史/callSession/静默
-    SVC->>SVC: 清理内存防抖 timer
+    SVC->>Redis: M02 写 cleanup marker 失效已排队防抖任务
+    SVC->>SVC: 其他通话级状态依赖 TTL 自动过期
 ```
 
 ---
@@ -3556,29 +3326,34 @@ sequenceDiagram
     autonumber
     participant Admin as 配置后台
     participant DB as 数据库
-    participant Pub as 发布服务<br/>(存量扩展 M12)
+    participant Pub as Copilot 配置发布服务
     participant SVC as Copilot Service
 
-    Admin->>DB: 编辑 cs_menu_item_copilot_ext
-    Note over DB: 活表数据更新
-    Admin->>DB: 编辑 cs_copilot_intent_mapping
-    Admin->>Pub: 点击"一键发布"
+    Admin->>DB: 写入新 version_id 的 cs_copilot_action 快照行
+    Admin->>DB: 写入同 version_id 的 cs_copilot_intent_mapping 快照行
+    Admin->>Pub: 点击"发布 Copilot 配置"
 
-    Pub->>DB: 读取存量表(cs_menu_*)
-    Pub->>DB: 读取 cs_menu_item_copilot_ext WHERE copilot_enabled='Y'
-    Pub->>DB: 读取 cs_copilot_intent_mapping WHERE enabled='Y'
+    Pub->>DB: 读取 cs_copilot_action WHERE version_id=? AND enabled='Y'
+    Pub->>DB: 读取 cs_copilot_intent_mapping WHERE version_id=? AND enabled='Y'
+    Pub->>DB: 按需读取 cs_menu_item
 
-    Pub->>Pub: 装配完整 CLOB JSON
-    Pub->>Pub: 计算 copilotIndex 反向索引
-    Pub->>DB: INSERT INTO cs_menu_version
+    Pub->>Pub: 执行 action / mapping / item 一致性校验
+    Pub->>DB: INSERT INTO cs_copilot_config_version(PUBLISHED)
 
     Pub->>SVC: POST /copilot/admin/config/refresh
-    SVC->>DB: 查询最新 cs_menu_version
-    SVC->>SVC: 内存中重建 CLOB + 反向索引
+    SVC->>DB: 查询最新 cs_copilot_config_version
+    SVC->>DB: 读取 action / mapping / item
+    SVC->>SVC: 内存中重建 CopilotConfigSnapshot
     SVC-->>Pub: 200 OK
 
     Pub-->>Admin: 发布成功
 ```
+
+菜单发布流程与 Copilot 配置发布流程解耦：
+
+- 菜单发布继续写 `cs_menu_version.config_data`。
+- Copilot 发布只写 `cs_copilot_config_version`，不修改菜单 CLOB。
+- 如果某个 action 关联 `menu_item_id`，发布服务只读取菜单表做一致性校验；运行时打开也以菜单表配置为准。
 
 ---
 
@@ -3628,7 +3403,8 @@ graph TB
 | 滚动发布 | 保证至少 1 个 Pod 可服务 |
 | Kafka 分区 | ≥ Pod 数 × 2，按 callId 哈希分区 |
 | Redis 集群 | 高可用，TTL 自动清理 |
-| CLOB 重新加载 | 通过 Admin 接口触发，不重启服务 |
+| Redis 单 slot 监控 | 监控 `{asr_merge}` slot 对应 master 节点的 CPU/QPS，超阈值时启动 F17 改造 |
+| Copilot 配置重新加载 | 通过 Admin 接口触发，并由版本轮询兜底，不重启服务 |
 
 ---
 
@@ -3710,7 +3486,7 @@ copilot:
 峰值：        5 次/秒
 
 WebSocket 在线连接： ~500 个（活跃坐席）
-CLOB 大小：          ~500KB（Top 30）
+Copilot 快照大小：   ~100KB（Top 30）
 
 Redis 容量：
   对话历史（含坐席）： 1.5GB
@@ -3720,8 +3496,9 @@ Redis 容量：
   共计：              ~1.7GB
 
 数据库表
-  cs_menu_item_copilot_ext      ~50 行
+  cs_copilot_action             ~50 行
   cs_copilot_intent_mapping     ~80 行
+  cs_copilot_config_version     按发布次数增长
   cs_copilot_trigger_log        日增 ~80,000 条
   cs_copilot_feedback_log       日增 ~50,000 条
 ```
@@ -3740,63 +3517,48 @@ Redis 容量：
 
 ## 35. 业务监控指标
 
-> DD-V1.1 调整：应用日志、接口监控用行内已有基础设施，本节仅描述业务面监控的落库字段。**不做看板**，看板留待 F10/F11 实现。
+> MVP 调整：调用/触发日志先输出应用日志；反馈结果写入 ES。**不做看板**，看板留待 F10/F11 实现。
 
-### 35.1 业务面埋点（仅落库）
+### 35.1 业务面埋点（MVP）
 
 #### 触发日志埋点（M07 + M16）
 
-每次意图识别后落 `cs_copilot_trigger_log` 一行记录：
+每次意图识别后输出一条结构化应用日志：
 
 ```
-意图识别成功 → 落库 1 行
+意图识别成功 → log.info 1 行
   - intent_code: 实际识别的意图
-  - item_id: 匹配到的功能（NULL=无映射）
+  - action_id: 匹配到的 Copilot 动作（NULL=无映射）
+  - menu_item_id: 可选关联菜单项
   - candidate_count: 候选总数
   - directive_id: 推送的指令 ID
-  - ai_response_time_ms: AI 响应耗时
-  - ai_success: AI 是否成功
 
-意图识别失败 → 落库 1 行
+意图识别失败 → log.info 1 行
   - intent_code: NULL
-  - ai_success: N
+  - result_status: FAIL
 ```
 
 #### 反馈日志埋点（M11 + M16）
 
-每次反馈落 `cs_copilot_feedback_log` 一行：
+每次反馈先投递有界异步队列，再通过 Java High Level REST Client 写入 ES 索引 `cs-copilot-feedback-log`：
 
 ```
-所有反馈类型都落库：
+所有反馈类型都写 ES：
   - feedback_type: ACCEPTED / IGNORED / WRONG_INTENT / WRONG_FUNCTION
-  - directive_id: 关联触发日志
+  - directive_id: 前端反馈携带的指令 ID
 ```
 
 ### 35.2 后续看板（F10/F11）能基于已有埋点实现
 
-```sql
--- 采纳率（基于本期埋点可直接计算）
-SELECT
-    COUNT(CASE WHEN feedback_type = 'ACCEPTED' THEN 1 END) * 1.0
-        / COUNT(directive_id) AS accept_rate
-FROM cs_copilot_trigger_log t
-LEFT JOIN cs_copilot_feedback_log f ON t.directive_id = f.directive_id
-WHERE t.trigger_time >= DATE '2026-04-24';
+```
+MVP 数据源：
+  - 触发日志：应用日志，按 [M16] Copilot trigger log 采集
+  - 反馈结果：ES 索引 cs-copilot-feedback-log
 
--- 无映射意图 TopN
-SELECT intent_code, COUNT(*) AS no_mapping_count
-FROM cs_copilot_trigger_log
-WHERE item_id IS NULL
-GROUP BY intent_code
-ORDER BY no_mapping_count DESC
-LIMIT 10;
-
--- AI 性能分位（计算 P95）
-SELECT
-    PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY ai_response_time_ms)
-        AS p95_response_time_ms
-FROM cs_copilot_trigger_log
-WHERE trigger_time >= NOW() - INTERVAL '1 hour';
+可计算指标：
+  - 采纳率：ES 中 feedback_type=ACCEPTED 的反馈数 / 应用日志中成功推送数
+  - 无映射意图 TopN：应用日志中 reason_code=INTENT_NOT_MAPPED 的 intent_code 聚合
+  - Action 反馈分布：ES 按 action_id + feedback_type 聚合
 ```
 
 ### 35.3 应用日志与接口监控
@@ -3888,11 +3650,8 @@ cs-copilot-service/
 │   │   │   ├── IntentTreeLoader.java
 │   │   │   └── ExecutedStepsManager.java
 │   │   ├── match/
-│   │   │   ├── IntentFunctionMatcher.java
-│   │   │   ├── RuleEvaluator.java
-│   │   │   └── JsonRuleEvaluator.java
+│   │   │   └── IntentFunctionMatcher.java
 │   │   ├── param/
-│   │   │   ├── ParamResolver.java
 │   │   │   └── StandardParamType.java
 │   │   ├── directive/
 │   │   │   ├── DirectiveBuilder.java
@@ -3915,7 +3674,7 @@ cs-copilot-service/
 │   │
 │   ├── config/                      # 配置缓存
 │   │   ├── CopilotConfigCache.java
-│   │   └── MenuVersionDao.java
+│   │   └── CopilotConfigRepository.java
 │   │
 │   ├── infra/                       # 基础设施
 │   │   ├── feign/                   # DD-V1.1: Feign 配置
@@ -3994,7 +3753,7 @@ public class NoOpEntityExtractor implements EntityExtractor {
 
 ```java
 public interface PermissionChecker {
-    PermissionResult check(String operatorId, long itemId);
+    PermissionResult check(String operatorId, String actionId, Long menuItemId);
 
     enum PermissionResult { ALLOW, DENY, UNKNOWN }
 }
@@ -4003,7 +3762,7 @@ public interface PermissionChecker {
 @ConditionalOnMissingBean(PermissionChecker.class)
 public class AllowAllPermissionChecker implements PermissionChecker {
     @Override
-    public PermissionResult check(String operatorId, long itemId) {
+    public PermissionResult check(String operatorId, String actionId, Long menuItemId) {
         return PermissionResult.ALLOW;  // 本期默认放行，前端控制
     }
 }
@@ -4062,24 +3821,23 @@ M06 AI Feign Client（DD-V1.1 关键测试）
   ✓ **过滤逻辑：只保留客户消息传给 AI**
 
 M07 匹配引擎
-  ✓ 单 intentCode 单 itemId
-  ✓ 单 intentCode 多 itemId（priority 排序）
-  ✓ condition_rule 命中/未命中
+  ✓ 单 intentCode 单 actionId
+  ✓ 单 intentCode 多 actionId（priority 排序）
+  ✓ 关联 menuItemId 的 action 可用性校验
   ✓ enabled=N 不返回
   ✓ DISABLED 风险等级不返回
 
-M08 参数解析
-  ✓ CUST_NO 从 session 取
-  ✓ CALL_ID 从 callMeta 取
-  ✓ EXP 字面值
-  ✓ **COOKIE_PLACEHOLDER 输出 ${COOKIE.xxx} 占位符**
-  ✓ 未知 paramType 跳过
+M08 参数配置透传
+  ✓ 后端不读取客户参数值
+  ✓ 校验 paramType 属于 CUST_NO / CUST_ID_NO / MOBPHN1 / ACCOUNT_NO
+  ✓ 校验 paramKey 必填
+  ✓ 将 param_config_json 透传为 action.paramConfigs
 
 M09 指令构建
   ✓ URL 拼接含 query
   ✓ URL 拼接 base 已含 ?
   ✓ 中文参数 URL 编码
-  ✓ **${COOKIE.xxx} 占位符不做 URL 编码**
+  ✓ 前端传入参数统一 URL 编码
   ✓ actionType 正确派生
   ✓ 域名白名单拦截
 ```
@@ -4097,7 +3855,7 @@ M09 指令构建
   ✓ AI 失败 → 静默
   ✓ 配置刷新 → 内存切换
   ✓ 通话结束清理
-  ✓ Cookie 占位符在 URL 中正确保留
+  ✓ 业务 paramType 正确透传给前端
 ```
 
 ---
@@ -4118,11 +3876,11 @@ M09 指令构建
 | M05 意图树加载器 + 热加载 | 1.5 | + Admin 接口（P1-7）|
 | M06 AI Feign Client + 熔断 + 过滤 + AI 计数 | 4 | + 熔断（P1-5），+ 计数（P1-4）|
 | M07 意图-功能匹配引擎 + 灰度白名单 + 异常默认 false | 4 | + 灰度（P1-9），+ 异常处理（P1-19）|
-| M08 参数解析器 + Cookie 受控 | 3 | + Cookie 白名单（P0-4）|
-| M09 跳转指令构建器 + URL 多重校验 | 3 | + URL 校验（P0-5），+ 修复 bug（P1-12）|
+| M08 参数配置透传 | 3 | 仅允许 4 个业务参数类型 |
+| M09 跳转指令构建器 + paramConfigs 透传 | 3 | + 基础目标构建，URL 安全由配置校验覆盖 |
 | M10 WebSocket 推送 | 2 | - |
 | M11 反馈接口 + 指令校验 + 幂等 + 静默列表 | 3.5 | + 指令校验（P0-6）|
-| M12 CLOB 扩展 + 发布前基础校验 | 4.5 | + 发布前校验（P1-8）|
+| M12 Copilot 配置发布 + 发布前基础校验 | 4.5 | + action/mapping/item 校验（P1-8）|
 | M13 Copilot 配置后台 | 6 | - |
 | M14 前端 SDK + 权限 fail closed + 卡片频控 | 9 | + fail closed（P1-20），+ 频控（P2-12）|
 | M15 五种打开方式 | 4 | - |
@@ -4140,13 +3898,13 @@ M09 指令构建
 | 评审项 | 增加工时 |
 |-------|---------|
 | P0-6 反馈指令校验 + 幂等 | +1.5 |
-| P0-4 Cookie 受控（前后端） | +1.5 |
+| P0-4 业务参数白名单（前后端） | +1.5 |
 | P0-5 URL 多重校验 | +1 |
 | P1-5 熔断 | +1 |
 | P1-7 意图树热加载 | +0.5 |
-| P1-8 CLOB 发布前校验 | +1.5 |
+| P1-8 Copilot 配置发布前校验 | +1.5 |
 | P1-9 灰度白名单 | +0 |
-| P1-13 Cookie required/optional | +1 |
+| P1-13 前端参数缺失处理 | +1 |
 | P1-16 trigger_log 字段扩展 | +0.5 |
 | P1-17 多 Pod 一致性 | +0.5 |
 | P1-20 前端权限 fail closed | +0.5 |
@@ -4187,7 +3945,7 @@ gantt
     指令构建+推送         :a4, after a3, 5d
     section 前端
     Copilot SDK 框架     :b1, after a2, 5d
-    浮窗+权限+Cookie     :b2, after b1, 5d
+    浮窗+权限+参数取值   :b2, after b1, 5d
     五种打开方式         :b3, after b2, 5d
     section 集成
     Top 30 配置          :c1, after a4, 5d
@@ -4200,9 +3958,9 @@ gantt
 |----|--------|--------------|
 | Week 1 | 基础框架 + 数据模型上线（含扩展字段） | - |
 | Week 2 | ASR 链路打通（M01-M04，**P0-7 顺序+P0-8 fail closed**） | 含安全调整 |
-| Week 3 | AI 接入 + 匹配引擎（M05-M08，**P1-5 熔断+P0-4 Cookie 白名单**） | 含安全增强 |
+| Week 3 | AI 接入 + 匹配引擎（M05-M08，**P1-5 熔断+业务参数白名单**） | 含安全增强 |
 | Week 4 | 推送 + 前端 SDK 端到端 Demo（**P0-5 URL 校验+P0-6 反馈校验+P1-20 fail closed**） | 含安全增强 |
-| Week 5 | 配置后台 + CLOB 扩展（M12 + M13，**P1-8 发布前校验**） | + 校验 |
+| Week 5 | 配置后台 + Copilot 配置发布（M12 + M13，**P1-8 发布前校验**） | + 校验 |
 | Week 6 | Top 30 配置 + 联调（**含 P1-9 灰度白名单+P1-17 多 Pod 一致性**） | 灰度准备 |
 | Week 7 | **延长灰度（DD-V1.2 P2-15）** 1-2 名坐席先行 | 风险控制 |
 | Week 8 | 灰度扩展（5-10 名坐席），观察 trigger_log 各 reason_code 分布 | 数据驱动 |
@@ -4264,7 +4022,7 @@ gantt
 - 配置实体规则到新增 `cs_copilot_entity_extractor` 表
 - 配置意图与实体的绑定关系
 
-**与本期关联**：通过 `EntityExtractor` 扩展点接入，不修改 `ParamResolver` 主流程。
+**与本期关联**：通过 `EntityExtractor` 扩展点接入；本期纯 action 参数保持后端透传、前端取值，实体抽取不进入主流程。
 
 **优先级**：P1
 
@@ -4281,11 +4039,11 @@ gantt
 **功能描述**：采纳率、推荐分布、坐席行为分析。
 
 **实现方式**：
-- 复用本期已埋点的 `cs_copilot_trigger_log` 和 `cs_copilot_feedback_log`
+- 复用本期触发应用日志与反馈 ES 索引
 - 新建 BI 看板（Grafana / 内部 BI 工具）
-- 不需要新增表
+- 不需要新增表，后续可按需接入日志平台或 ES 聚合
 
-**与本期关联**：本期已落库的字段足够支撑后续看板。
+**与本期关联**：本期已采集的字段足够支撑后续看板。
 
 **优先级**：P2
 
@@ -4319,15 +4077,16 @@ F03/F04/F06/F07/F08/F09/F11/F12 详细规划与 DD-V1.0 一致，扩展接入路
 |------|------|
 | ASR | 自动语音识别 |
 | intentCode | AI 团队维护的标准意图编码（字符串） |
-| item_id | `cs_menu_item` 表主键 |
+| action_id | `cs_copilot_action` 表主键，Copilot 推荐和反馈的主业务标识 |
+| item_id / menu_item_id | `cs_menu_item` 表主键；在 Copilot 中仅作为可选快捷导航关联 |
 | 句间合并 | 多个 ASR 短句合并为一次意图查询的机制 |
 | executedSteps | 已执行意图步骤，传给 AI 辅助决策 |
 | 静默列表 | 单通话内不再推荐的意图/功能集合 |
-| CLOB | `cs_menu_version.config_data` 中的配置全量 JSON |
-| 反向索引 | CLOB 中的 `copilotIndex.intentToItems` 等加速查询结构 |
+| 菜单 CLOB | `cs_menu_version.config_data` 中的菜单发布快照，Copilot 不再向其中写入 `copilotIndex` |
+| CopilotConfigSnapshot | Copilot Service 从独立配置表构建的本地不可变配置快照 |
+| 反向索引 | CopilotConfigSnapshot 中的 `intentToActions` / `actionById` 等加速查询结构 |
 | 扩展点 | 接口形式预留的扩展位置，本期空实现 |
-| StandardParamType | 14 个标准参数枚举（DD-V1.1 新增 COOKIE_PLACEHOLDER） |
-| Cookie 占位符 | URL 中的 `${COOKIE.xxx}`，由前端从 cookie 读取替换 |
+| StandardParamType | 4 个前端工作台可取值的业务参数枚举：CUST_NO / CUST_ID_NO / MOBPHN1 / ACCOUNT_NO |
 | 全量保存 | M03 保存客户+坐席消息，过滤在 M06 |
 
 ---
@@ -4346,13 +4105,13 @@ F03/F04/F06/F07/F08/F09/F11/F12 详细规划与 DD-V1.0 一致，扩展接入路
 | 灰度 | 双重灰度 | F07 待实现 |
 | 跨环境同步 | biz_key + env_map | F08 待实现 |
 | 沙箱 | 配置 + AI 评估 | F09 待实现 |
-| 看板 | 业务 + 配置质量 | 仅落库，F10/F11 待实现 |
+| 看板 | 业务 + 配置质量 | 仅采集日志/ES 数据，F10/F11 待实现 |
 | 意图树 | 数据库 + 一键发布 | Spring 配置文件 |
 | **服务端权限校验**（DD-V1.1） | IAM 接口校验 | **删除，前端控制；F13 待实现** |
 | **外部接口客户端**（DD-V1.1） | RestTemplate | **Spring Cloud OpenFeign** |
-| **URL 拼接**（DD-V1.1） | 服务端拼完整 URL | **服务端用占位符 + 前端补 Cookie** |
+| **URL 拼接**（DD-V1.1） | 服务端拼完整 URL | **服务端透传 paramConfigs + 前端取业务参数** |
 | **会话保存与过滤**（DD-V1.1） | 一起处理 | **保存全量 + 调 AI 时过滤** |
-| **业务监控**（DD-V1.1） | 完整看板 | **仅落库，看板后续做** |
+| **业务监控**（DD-V1.1） | 完整看板 | **调用日志打应用日志，反馈写 ES，看板后续做** |
 | 数据模型 | 10+ 张表 | 4 张新增表 |
 | 工时（一阶段） | 60-65 人日 | 64 人日 |
 
@@ -4364,7 +4123,7 @@ F03/F04/F06/F07/F08/F09/F11/F12 详细规划与 DD-V1.0 一致，扩展接入路
 | AI 接口客户端 | RestTemplate | Feign Client |
 | 对话历史保存 | 客户+坐席 | 客户+坐席（明确"全量保存"语义） |
 | AI 调用前过滤 | 未明确 | M06 调用前过滤只传客户 |
-| Cookie 占位符 | 无 | ${COOKIE.xxx} 占位符 + 前端替换 |
+| 参数取值 | 无 | 后端透传业务 paramType，前端取值并拼接 |
 | 业务监控 | 简略提及 | 结构化埋点字段详化 |
 | 数据库 DDL | 简略 | 完整 DDL + 字段说明 |
 | 接口设计 | 简略 | 完整 JSON 示例 + 字段表 + 错误码 |
@@ -4377,19 +4136,19 @@ F03/F04/F06/F07/F08/F09/F11/F12 详细规划与 DD-V1.0 一致，扩展接入路
 | M01 顺序 | 触发过滤前置 | **先存历史再触发判断（P0-7）** |
 | callSession 缺失处理 | 用空 operatorId 推 | **fail closed 不推荐（P0-8）** |
 | 反馈接口校验 | 仅幂等说明 | **directive_id UNIQUE + 服务端校验 + is_effective（P0-6）** |
-| Cookie 占位符 | 名格式校验 | **白名单 + 域名绑定 + required/optional（P0-4 + P1-13）** |
+| 参数取值 | 旧版允许后端配置具体 Cookie 参数 | **仅允许 4 个业务参数类型，前端统一取值** |
 | URL 校验 | 仅域名白名单 | **协议+域名+生产禁 UAT+同名冲突（P0-5）** |
 | AI 接口保护 | 仅超时 | **+ Resilience4j 熔断（P1-5）+ 单通话计数（P1-4）** |
 | 灰度 | 不做 | **最简 operatorId 白名单（P1-9）** |
-| CLOB 发布 | 仅 enabled=Y | **+ 基础校验门禁（P1-8）** |
+| Copilot 配置发布 | 仅 enabled=Y | **+ action/mapping/item 基础校验门禁（P1-8）** |
 | 意图树更新 | 重启加载 | **+ 热加载接口（P1-7）** |
 | 多 Pod 一致性 | 单 Pod Admin 接口 | **+ 30s 轮询版本号（P1-17）** |
 | 前端权限失败 | 未明确 | **fail closed（P1-20）** |
 | 前端卡片 | 无频控 | **+ directiveId 去重 + intent 冷却 + 单通话上限（P2-12）** |
-| trigger_log 字段 | 基础 | **+ result_status / reason_code / filter_stage / asr_confidence 等（P1-16）** |
-| feedback_log 字段 | 基础 | **+ is_effective / frontend_reason（P1-14 + P2-10）** |
+| trigger_log 字段 | 基础 | **+ action_id / menu_item_id / result_status / reason_code / filter_stage（P1-16）** |
+| feedback_log 字段 | 基础 | **+ action_id / menu_item_id / is_effective（P1-14）** |
 | operator_id 长度 | varchar(16) | **varchar(32)（P2-2）** |
-| condition_rule 异常 | 未明确 | **默认 false 防御性（P1-19 部分）** |
+| condition_rule | 配置可用 | **本期删除，复杂条件后续独立设计** |
 | 评审采纳 | - | **附录 C 详细采纳清单** |
 | 已知风险声明 | 隐含 | **2.3 节明示已知风险** |
 | 待实现 | F01-F13 | **F01-F15（+F14 一次性 token, F15 timer 持久化）** |
@@ -4418,15 +4177,15 @@ F03/F04/F06/F07/F08/F09/F11/F12 详细规划与 DD-V1.0 一致，扩展接入路
 
 | 编号 | 评审建议 | 采纳情况 | 落地章节 |
 |------|---------|---------|---------|
-| P0-1 | 服务端权限校验完全删除风险高 | ⚠️ **部分采纳**：itemId 启用校验 + callSession 必校验；权限快照不采纳 | M07 + 11.5 |
+| P0-1 | 服务端权限校验完全删除风险高 | ⚠️ **部分采纳**：action 启用校验 + 关联 menuItem 校验 + callSession 必校验；权限快照不采纳 | M07 + 11.5 |
 | P0-2 | 对话历史不脱敏 | ❌ **不采纳**：用户明确决策；F05 待实现 | 2.3 已知风险声明 |
 | P0-3 | AI 调用未脱敏 | ❌ **不采纳**：同 P0-2 | 2.3 已知风险声明 |
-| P0-4 | Cookie 占位符泄露风险 | ⚠️ **部分采纳**：白名单 + 域名绑定；同源校验已通过 URL 白名单兜底 | 15.2 Cookie 受控 |
+| P0-4 | Cookie / token 泄露风险 | ✅ **完全规避**：后端不再允许配置具体 Cookie 名，仅允许业务 paramType | 15.2 |
 | P0-5 | URL 安全校验过简 | ⚠️ **部分采纳**：https + UAT 拦截 + 同名策略；路径/key 白名单不做（过度设计）| 16.4 URL 多重校验 |
 | P0-6 | 反馈接口缺指令校验 | ✅ **完全采纳** | 17 章 + 21.4/21.5 DDL |
 | P0-7 | M01 顺序冲突全量保存 | ✅ **完全采纳** | 8.2 + 8.4 |
 | P0-8 | callSession 缺失继续推荐不安全 | ✅ **完全采纳** | 11.5 fail closed |
-| P0-9 | URL token 长期保存风险 | ⚠️ **部分采纳**：白名单限制；一次性 token F14 待实现 | 15.2 |
+| P0-9 | URL token 长期保存风险 | ✅ **完全规避**：后端不配置 token 或具体 Cookie 名；一次性 token F14 保留为长期扩展 | 15.2 |
 | P0-10 | 后端按 AI 意图生成推荐缺前置过滤 | ❌ **不采纳**：用户明确决策；性能开销在 5 TPS 量级可忽略 | 2.3 |
 
 ### C.3 P1 级采纳详情
@@ -4440,18 +4199,18 @@ F03/F04/F06/F07/F08/F09/F11/F12 详细规划与 DD-V1.0 一致，扩展接入路
 | P1-5 | AI 缺熔断 | ⚠️ 部分采纳：仅熔断；不做限流/Bulkhead | 13.3 熔断保护 |
 | P1-6 | 只传客户损失上下文 | ❌ **不采纳**：用户明确决策 | - |
 | P1-7 | 意图树需热加载 | ✅ 完全采纳 | 12.3 热加载接口 |
-| P1-8 | CLOB 发布缺校验 | ✅ 完全采纳 | M12 发布前基础校验 |
+| P1-8 | 配置发布缺校验 | ✅ 完全采纳 | M12 发布前基础校验 |
 | P1-9 | 无灰度机制 | ✅ 完全采纳：最简坐席白名单 | 14.5 灰度白名单 |
 | P1-10 | mapping_priority 重复 | ✅ 完全采纳：删除扩展表字段 | 21.2 DDL |
-| P1-11 | 参数缺失 reason 缺失 | ✅ 合并采纳 → P1-16 | 21.4 missing_params_json |
+| P1-11 | 参数缺失 reason 缺失 | ✅ 合并采纳 → P1-16 | result_status / reason_code |
 | P1-12 | UrlBuilder 尾部分隔符 bug | ✅ 完全采纳 | 16.4 |
-| P1-13 | Cookie 缺失保留占位符 | ✅ 完全采纳：required/optional 区分 | 19.4 替换函数 |
+| P1-13 | 前端参数缺失处理不清 | ✅ 完全采纳：前端按业务 paramType 统一处理缺失 | 19.4 |
 | P1-14 | 反馈幂等未保证 | ✅ 合并采纳 → P0-6 + is_effective | 21.5 DDL |
 | P1-15 | trigger-feedback 关联不稳定 | ✅ 合并采纳 → P0-6 + UNIQUE 索引 | 21.4 |
 | P1-16 | 日志缺失败原因 | ✅ 完全采纳：result_status/reason_code 等 | 18.5 + 21.4 |
 | P1-17 | Admin 刷新只刷单 Pod | ✅ 完全采纳：30s 轮询兜底 | M17 新增模块 |
 | P1-18 | 配置版本语义不清 | ✅ 完全采纳：协调存量团队 | 14.2 |
-| P1-19 | condition_rule 缺白名单 | ⚠️ 部分采纳：异常默认 false；字段白名单不做 | 14.4 防御性编程 |
+| P1-19 | condition_rule 缺白名单 | ✅ 调整采纳：本期删除 condition_rule | 14.3 |
 | P1-20 | 前端权限 API 不稳定 | ✅ 完全采纳 | 19.3 fail closed |
 
 ### C.4 P2 级采纳详情
@@ -4462,15 +4221,15 @@ F03/F04/F06/F07/F08/F09/F11/F12 详细规划与 DD-V1.0 一致，扩展接入路
 | P2-2 | operator_id 长度 16 偏短 | ✅ 完全采纳：改为 32 | 21 章 DDL |
 | P2-3 | customer_id 敏感等级 | ⚠️ 部分采纳：文档标注；脱敏 F05 | 21.4 字段说明 |
 | P2-4 | Map.of 不能 null | ✅ 完全采纳 | M04 callSession |
-| P2-5 | Cookie 正则 \w+ 偏严 | ✅ 完全采纳：[A-Za-z0-9_.-]+ | 15.2 |
+| P2-5 | Cookie 名正则偏严 | 不再适用：后端不配置具体 Cookie 名 | 15.2 |
 | P2-6 | params 编码语义不一 | ✅ 完全采纳：URL/Component 分别处理 | 19.4 |
 | P2-7 | OPEN_URL location.href 风险 | ✅ 完全采纳：文档说明 | 19 + 配置后台校验 |
 | P2-8 | 健康检查 AI 实时打 | ✅ 完全采纳：使用最近一次状态 | 27 章 |
 | P2-9 | Feign body 日志风险 | ✅ 合并采纳 → 36 章日志规范 | 36 章 |
-| P2-10 | AI 失败缺 reason 分类 | ✅ 合并采纳 → P1-16 ai_failure_reason | 21.4 |
+| P2-10 | AI 失败缺 reason 分类 | ✅ 合并采纳 → P1-16 result_status / reason_code | 18.5 + 21.5 |
 | P2-11 | trigger_keywords 说明少 | ✅ 完全采纳 | 21.2 字段说明 |
 | P2-12 | 前端缺频控去重 | ✅ 完全采纳 | 19.6 卡片频控 |
-| P2-13 | CLOB itemById params 敏感 | ❌ **不采纳**：评审理解有误（CLOB 含配置非值） | - |
+| P2-13 | CLOB itemById params 敏感 | ✅ 方案调整后消除：Copilot 不再写入菜单 CLOB | 22 章 |
 | P2-14 | 通话结束依赖前端 unbind | ❌ **不采纳**：TTL 兜底足够 | - |
 | P2-15 | Week8 全量上线激进 | ✅ 完全采纳：Week 9-10 灰度延长 | 41 章里程碑 |
 
@@ -4486,7 +4245,7 @@ F03/F04/F06/F07/F08/F09/F11/F12 详细规划与 DD-V1.0 一致，扩展接入路
 3. 性能影响在 5 TPS 量级可忽略
 
 **已采纳的部分**：
-- itemId 启用校验（M07 中本来就有 isEnabled 判断，明确化）
+- action 启用校验；关联菜单项时校验 menuItem 存在、启用且与快照一致
 - callSession 必校验（与 P0-8 合并，详见 11.5）
 
 #### P0-2 + P0-3：对话历史 / AI 调用脱敏
@@ -4511,7 +4270,7 @@ F03/F04/F06/F07/F08/F09/F11/F12 详细规划与 DD-V1.0 一致，扩展接入路
 
 #### P2-13：CLOB itemById 中 params 敏感
 
-**不采纳原因**：评审人员理解有误。CLOB 中的 params 是**配置项**（paramType + paramKey + paramValue 配置值），而非**实际参数值**。运行时才解析为实际值。CLOB 中不含真实客户数据。
+**调整后结论**：Copilot 配置不再写入 `cs_menu_version.config_data`，也不再生成 `copilotIndex.itemById`。纯 action 参数来自 `cs_copilot_action.param_config_json`；关联菜单项时指令只传 `menuItemId`，由前端复用现有快捷导航打开逻辑，运行时不在 Copilot 配置快照中保存真实客户数据。
 
 #### P2-14：通话结束依赖前端 unbind
 
@@ -4526,7 +4285,7 @@ F03/F04/F06/F07/F08/F09/F11/F12 详细规划与 DD-V1.0 一致，扩展接入路
 | 对话历史含敏感原文 | P0-2 | F05 |
 | AI 调用未脱敏 | P0-3 | F05 |
 | 服务端不校验业务权限 | P0-1（部分）+ P0-10 | F13 |
-| Cookie 占位符若误配高敏字段 | P0-9（长期方案） | F14 |
+| 前端业务参数取值规则不一致 | P0-9（长期方案） | F14 |
 | Pod 重启 timer 丢失 | P1-3 | F15 |
 | 配置发布基础校验非完整沙箱 | （评审未明确，DD-V1.2 主动声明） | F09 |
 

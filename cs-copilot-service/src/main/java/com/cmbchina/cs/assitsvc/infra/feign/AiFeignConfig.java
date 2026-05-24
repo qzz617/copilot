@@ -5,14 +5,12 @@ import feign.Request;
 import feign.codec.ErrorDecoder;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
 
 import java.util.concurrent.TimeUnit;
 
 /**
  * AI 意图识别 Feign 配置。
  */
-@Configuration
 public class AiFeignConfig {
 
     /**

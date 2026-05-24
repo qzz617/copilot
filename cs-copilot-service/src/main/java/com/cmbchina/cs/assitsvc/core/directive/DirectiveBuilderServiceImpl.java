@@ -1,24 +1,22 @@
 package com.cmbchina.cs.assitsvc.core.directive;
 
-import com.cmbchina.cs.assitsvc.core.param.ParamResolveResult;
-import com.cmbchina.cs.assitsvc.core.param.ParamResolverService;
 import com.cmbchina.cs.assitsvc.domain.ActionInfo;
 import com.cmbchina.cs.assitsvc.domain.BuildContext;
-import com.cmbchina.cs.assitsvc.domain.CopilotExt;
+import com.cmbchina.cs.assitsvc.domain.CopilotActionConfig;
 import com.cmbchina.cs.assitsvc.domain.DirectiveDTO;
 import com.cmbchina.cs.assitsvc.domain.DisplayInfo;
 import com.cmbchina.cs.assitsvc.domain.FunctionInfo;
 import com.cmbchina.cs.assitsvc.domain.IntentInfo;
 import com.cmbchina.cs.assitsvc.domain.IntentResult;
-import com.cmbchina.cs.assitsvc.domain.ItemFullConfig;
+import com.cmbchina.cs.assitsvc.domain.ItemParam;
 import com.cmbchina.cs.assitsvc.domain.RiskInfo;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.time.Instant;
-import java.time.temporal.ChronoUnit;
-import java.util.Map;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -28,28 +26,23 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class DirectiveBuilderServiceImpl implements DirectiveBuilderService {
 
-    private final ParamResolverService paramResolverService;
-    private final UrlBuilder urlBuilder;
+    @Value("${copilot.directive.expire-seconds:30}")
+    private int directiveExpireSeconds;
 
     @Override
     public DirectiveDTO build(BuildContext context, IntentResult intentResult) {
         validate(context, intentResult);
 
-        ItemFullConfig item = context.getItem();
-        CopilotExt ext = item.getCopilotExt();
-        String targetKind = firstText(extValue(ext, "targetKind"), item.getTargetKind());
-        String openMode = firstText(extValue(ext, "openMode"), item.getOpenMode());
-        String targetUrl = resolveTargetUrl(item, ext, targetKind);
-
-        ParamResolveResult paramResult = paramResolverService.resolveParams(
-                item.getParams(), context.getParamContext(), targetUrl);
-        if (!paramResult.isSuccess()) {
-            throw new DirectiveBuildException("Required params missing: " + paramResult.getMissingParams());
+        CopilotActionConfig action = context.getAction();
+        if (isMenuItemAction(action)) {
+            return buildMenuItemDirective(context, intentResult, action);
         }
 
-        String actionUrl = buildActionUrl(targetKind, targetUrl, paramResult.getParams());
+        String targetKind = action.getTargetKind();
+        String openMode = action.getOpenMode();
+        String targetUrl = resolveTargetUrl(action);
+
         String actionType = deriveActionType(targetKind, openMode);
-        String riskLevel = riskLevel(item, ext);
 
         return DirectiveDTO.builder()
                 .directiveId(generateDirectiveId())
@@ -57,18 +50,36 @@ public class DirectiveBuilderServiceImpl implements DirectiveBuilderService {
                 .callId(context.getCallId())
                 .operatorId(context.getOperatorId())
                 .configVersion(context.getConfigVersion())
-                .expireAt(Instant.now().plus(30, ChronoUnit.SECONDS).toString())
+                .expireAt(Instant.now().plusSeconds(Math.max(1, directiveExpireSeconds)).toString())
                 .intent(buildIntent(intentResult))
-                .function(buildFunction(item, ext))
-                .display(buildDisplay(intentResult, ext))
-                .action(buildAction(targetKind, openMode, actionType, actionUrl, paramResult.getParams()))
-                .risk(buildRisk(riskLevel))
+                .function(buildFunction(action))
+                .display(buildDisplay(intentResult, action))
+                .action(buildAction(resolveTargetSource(action), targetKind, openMode, actionType,
+                        targetUrl, action.getParams()))
+                .risk(buildRisk(action.getRiskLevel()))
+                .build();
+    }
+
+    private DirectiveDTO buildMenuItemDirective(BuildContext context, IntentResult intentResult,
+                                                CopilotActionConfig action) {
+        return DirectiveDTO.builder()
+                .directiveId(generateDirectiveId())
+                .directiveType("RECOMMENDATION")
+                .callId(context.getCallId())
+                .operatorId(context.getOperatorId())
+                .configVersion(context.getConfigVersion())
+                .expireAt(Instant.now().plusSeconds(Math.max(1, directiveExpireSeconds)).toString())
+                .intent(buildIntent(intentResult))
+                .function(buildFunction(action))
+                .display(buildDisplay(intentResult, action))
+                .action(buildMenuItemAction())
+                .risk(buildRisk(action.getRiskLevel()))
                 .build();
     }
 
     private static void validate(BuildContext context, IntentResult intentResult) {
-        if (context == null || context.getItem() == null) {
-            throw new DirectiveBuildException("BuildContext.item must not be null");
+        if (context == null || context.getAction() == null) {
+            throw new DirectiveBuildException("BuildContext.action must not be null");
         }
         if (!StringUtils.hasText(context.getCallId()) || !StringUtils.hasText(context.getOperatorId())) {
             throw new DirectiveBuildException("callId and operatorId must not be empty");
@@ -78,15 +89,6 @@ public class DirectiveBuilderServiceImpl implements DirectiveBuilderService {
         }
     }
 
-    private String buildActionUrl(String targetKind, String targetUrl, Map<String, String> params) {
-        if ("URL".equalsIgnoreCase(targetKind)
-                || "IFRAME".equalsIgnoreCase(targetKind)
-                || "NEW_WINDOW".equalsIgnoreCase(targetKind)) {
-            return urlBuilder.buildUrl(targetUrl, params);
-        }
-        return targetUrl;
-    }
-
     private static IntentInfo buildIntent(IntentResult intentResult) {
         return IntentInfo.builder()
                 .intentCode(intentResult.getIntentCode())
@@ -94,33 +96,50 @@ public class DirectiveBuilderServiceImpl implements DirectiveBuilderService {
                 .build();
     }
 
-    private static FunctionInfo buildFunction(ItemFullConfig item, CopilotExt ext) {
+    private static FunctionInfo buildFunction(CopilotActionConfig action) {
         return FunctionInfo.builder()
-                .itemId(item.getItemId())
-                .itemName(item.getItemName())
-                .functionPath(ext == null ? null : ext.getFunctionPath())
+                .actionId(action.getActionId())
+                .actionName(action.getActionName())
+                .menuItemId(action.getMenuItemId())
+                .functionPath(action.getFunctionPath())
                 .build();
     }
 
-    private static DisplayInfo buildDisplay(IntentResult intentResult, CopilotExt ext) {
-        String displayText = ext == null ? null : ext.getAiDisplayText();
+    private static DisplayInfo buildDisplay(IntentResult intentResult, CopilotActionConfig action) {
+        String displayText = action.getAiDisplayText();
         String titleText = StringUtils.hasText(displayText) ? displayText : intentResult.getIntentName();
         return DisplayInfo.builder()
                 .title("识别到：" + (StringUtils.hasText(titleText) ? titleText : intentResult.getIntentCode()))
-                .tip(ext == null ? null : ext.getFloatingTipText())
-                .iconUrl(ext == null ? null : ext.getIconUrl())
+                .tip(action.getFloatingTipText())
+                .iconUrl(action.getIconUrl())
                 .build();
     }
 
-    private static ActionInfo buildAction(String targetKind, String openMode, String actionType,
-                                          String actionUrl, Map<String, String> params) {
+    private static ActionInfo buildAction(String targetSource, String targetKind, String openMode, String actionType,
+                                          String actionUrl, List<ItemParam> paramConfigs) {
         return ActionInfo.builder()
+                .targetSource(targetSource)
                 .targetKind(targetKind)
                 .openMode(openMode)
                 .actionType(actionType)
                 .url(actionUrl)
-                .params(params)
+                .paramConfigs(paramConfigs)
                 .build();
+    }
+
+    private static ActionInfo buildMenuItemAction() {
+        return ActionInfo.builder()
+                .targetSource("MENU_ITEM")
+                .actionType("OPEN_MENU_ITEM")
+                .build();
+    }
+
+    private static String resolveTargetSource(CopilotActionConfig action) {
+        return action.getMenuItemId() == null ? "ACTION" : "MENU_ITEM";
+    }
+
+    private static boolean isMenuItemAction(CopilotActionConfig action) {
+        return action.getMenuItemId() != null;
     }
 
     private static RiskInfo buildRisk(String riskLevel) {
@@ -131,17 +150,15 @@ public class DirectiveBuilderServiceImpl implements DirectiveBuilderService {
                 .build();
     }
 
-    private static String resolveTargetUrl(ItemFullConfig item, CopilotExt ext, String targetKind) {
-        if ("ROUTE".equalsIgnoreCase(targetKind) && ext != null && StringUtils.hasText(ext.getRoutePath())) {
-            return ext.getRoutePath();
+    private static String resolveTargetUrl(CopilotActionConfig action) {
+        String targetKind = action.getTargetKind();
+        if ("ROUTE".equalsIgnoreCase(targetKind)) {
+            if (!StringUtils.hasText(action.getRoutePath())) {
+                throw new DirectiveBuildException("routePath must not be empty for targetKind=ROUTE");
+            }
+            return action.getRoutePath();
         }
-        if ("COMPONENT".equalsIgnoreCase(targetKind)) {
-            return ext == null ? null : ext.getFallbackUrl();
-        }
-        String url = item.getUrl();
-        if (!StringUtils.hasText(url) && ext != null) {
-            url = ext.getFallbackUrl();
-        }
+        String url = action.getTargetUrl();
         if (("URL".equalsIgnoreCase(targetKind)
                 || "IFRAME".equalsIgnoreCase(targetKind)
                 || "NEW_WINDOW".equalsIgnoreCase(targetKind)) && !StringUtils.hasText(url)) {
@@ -165,12 +182,6 @@ public class DirectiveBuilderServiceImpl implements DirectiveBuilderService {
         if ("ROUTE".equals(target)) {
             return "OPEN_ROUTE";
         }
-        if ("COMPONENT".equals(target) && "DRAWER".equals(mode)) {
-            return "OPEN_COMPONENT_DRAWER";
-        }
-        if ("COMPONENT".equals(target)) {
-            return "OPEN_COMPONENT_POPUP";
-        }
         if ("IFRAME".equals(target)) {
             return "OPEN_IFRAME";
         }
@@ -178,30 +189,6 @@ public class DirectiveBuilderServiceImpl implements DirectiveBuilderService {
             return "OPEN_NEW_WINDOW";
         }
         throw new DirectiveBuildException("Unsupported targetKind/openMode: " + targetKind + "/" + openMode);
-    }
-
-    private static String riskLevel(ItemFullConfig item, CopilotExt ext) {
-        if (ext != null && StringUtils.hasText(ext.getRiskLevel())) {
-            return ext.getRiskLevel();
-        }
-        return item.getRiskLevel();
-    }
-
-    private static String extValue(CopilotExt ext, String field) {
-        if (ext == null) {
-            return null;
-        }
-        if ("targetKind".equals(field)) {
-            return ext.getTargetKind();
-        }
-        if ("openMode".equals(field)) {
-            return ext.getOpenMode();
-        }
-        return null;
-    }
-
-    private static String firstText(String first, String second) {
-        return StringUtils.hasText(first) ? first : second;
     }
 
     private static String generateDirectiveId() {

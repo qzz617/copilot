@@ -6,11 +6,9 @@ import com.cmbchina.cs.assitsvc.domain.DialogMessage;
 import com.cmbchina.cs.assitsvc.infra.redis.HistoryProperties;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataAccessException;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
-import redis.clients.jedis.Jedis;
-import redis.clients.jedis.JedisPool;
-import redis.clients.jedis.Pipeline;
-import redis.clients.jedis.exceptions.JedisException;
 
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -23,18 +21,37 @@ import java.util.List;
  * {@link DialogHistoryManager} 的 Redis 实现。
  *
  * <p>Redis key 格式：{@code copilot:history:{callId}}，类型 List。
- * 每次 append 用 Pipeline 批发 RPUSH + LTRIM + EXPIRE，减少网络往返。
+ * 每次 append 写入尾部后裁剪到最新 maxSize 条，并刷新 TTL。
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class DialogHistoryManagerImpl implements DialogHistoryManager {
 
-    private static final String KEY_PREFIX = "copilot:history:";
+    private static final String KEY_PREFIX = "copilot:history:{";
+    private static final String KEY_SUFFIX = "}";
     private static final DateTimeFormatter CREATE_TIME_FMT =
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
-    private final JedisPool jedisPool;
+    /**
+     * Lua 脚本：RPUSH + LTRIM + EXPIRE 原子化。
+     * 避免三步之间的瞬态不一致（如 RPUSH 后崩溃导致 list 超长且无 TTL）。
+     * <pre>
+     * KEYS[1] = list key
+     * ARGV[1] = JSON 消息
+     * ARGV[2] = maxSize（trim 起点 = -maxSize）
+     * ARGV[3] = TTL（秒）
+     * </pre>
+     */
+    private static final org.springframework.data.redis.core.script.DefaultRedisScript<Long> APPEND_SCRIPT =
+            new org.springframework.data.redis.core.script.DefaultRedisScript<>(
+                    "redis.call('RPUSH', KEYS[1], ARGV[1]); "
+                            + "redis.call('LTRIM', KEYS[1], -tonumber(ARGV[2]), -1); "
+                            + "redis.call('EXPIRE', KEYS[1], ARGV[3]); "
+                            + "return 1;",
+                    Long.class);
+
+    private final StringRedisTemplate redisTemplate;
     private final HistoryProperties props;
 
     @Override
@@ -54,15 +71,14 @@ public class DialogHistoryManagerImpl implements DialogHistoryManager {
             return;
         }
 
-        String key = KEY_PREFIX + callId;
-        try (Jedis jedis = jedisPool.getResource();
-             Pipeline pipeline = jedis.pipelined()) {
-            pipeline.rpush(key, json);
-            // 保留尾部最新的 maxSize 条，超出时裁剪头部旧数据
-            pipeline.ltrim(key, -props.getMaxSize(), -1);
-            pipeline.expire(key, props.getTtlHours() * 3600);
-            pipeline.sync();
-        } catch (JedisException e) {
+        String key = key(callId);
+        try {
+            redisTemplate.execute(APPEND_SCRIPT,
+                    java.util.Collections.singletonList(key),
+                    json,
+                    String.valueOf(props.getMaxSize()),
+                    String.valueOf(props.getTtlHours() * 3600L));
+        } catch (DataAccessException e) {
             log.warn("[M03] Redis append failed, callId={}", callId, e);
         }
     }
@@ -73,12 +89,14 @@ public class DialogHistoryManagerImpl implements DialogHistoryManager {
             throw new IllegalArgumentException("callId must not be null or empty");
         }
 
-        String key = KEY_PREFIX + callId;
         List<String> jsonList;
-        try (Jedis jedis = jedisPool.getResource()) {
-            jsonList = jedis.lrange(key, 0, -1);
-        } catch (JedisException e) {
+        try {
+            jsonList = redisTemplate.opsForList().range(key(callId), 0, -1);
+        } catch (DataAccessException e) {
             log.warn("[M03] Redis getHistory failed, callId={}", callId, e);
+            return Collections.emptyList();
+        }
+        if (jsonList == null) {
             return Collections.emptyList();
         }
 
@@ -93,30 +111,33 @@ public class DialogHistoryManagerImpl implements DialogHistoryManager {
         return result;
     }
 
+    /**
+     * 通话结束时调用。
+     *
+     * <p><b>行内规范</b>：Redis 不使用 delete 等阻塞命令，临时数据完全依赖 TTL 自动过期清理。
+     * 本方法仅保留日志和方法签名，作为通话生命周期事件钩子；如未来引入其他清理动作可在此扩展。
+     */
     @Override
     public void cleanup(String callId) {
         if (callId == null || callId.isEmpty()) {
-            throw new IllegalArgumentException("callId must not be null or empty");
+            log.debug("[M03] Cleanup skipped on blank callId");
+            return;
         }
-
-        String key = KEY_PREFIX + callId;
-        try (Jedis jedis = jedisPool.getResource()) {
-            jedis.del(key);
-        } catch (JedisException e) {
-            log.warn("[M03] Redis cleanup failed, callId={}", callId, e);
-        }
+        log.debug("[M03] Cleanup invoked, relying on TTL expiration, callId={}", callId);
     }
 
     /**
      * 将 ASR 事件转换为对话消息。
-     * speakerRole 映射：CUSTOMER → user，其余（AGENT）→ assistant。
-     * speakerRole 字段原样保留，供 M06 按需过滤。
+     *
+     * <p>不在写入阶段硬编码 role 字段：原先 {@code AGENT → "assistant"} 的映射与
+     * AI 接口语义（assistant 指 AI 自己）冲突。role 改由消费侧
+     * （{@link com.cmbchina.cs.assitsvc.core.intent.IntentRecognitionServiceImpl}）在
+     * 出口阶段按需映射，本类只忠实保留 speakerRole 原值。
      */
     private static DialogMessage toDialogMessage(AsrSentenceEvent event) {
-        String role = "CUSTOMER".equalsIgnoreCase(event.getSpeakerRole()) ? "user" : "assistant";
         return DialogMessage.builder()
                 .id(event.getSentenceId())
-                .role(role)
+                .role(null)
                 .content(event.getContent())
                 .contentType("text")
                 .createTime(formatBeginTime(event.getBeginTime()))
@@ -137,5 +158,9 @@ public class DialogHistoryManagerImpl implements DialogHistoryManager {
         } catch (Exception e) {
             return LocalDateTime.now().format(CREATE_TIME_FMT);
         }
+    }
+
+    private static String key(String callId) {
+        return KEY_PREFIX + callId + KEY_SUFFIX;
     }
 }

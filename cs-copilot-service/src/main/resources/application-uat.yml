@@ -15,6 +15,9 @@ copilot:
   ai:
     url: ${AI_INTENT_URL_UAT:http://aicscopilotreplygensop.sk.aipower3.cmbchina.cn}
   url-whitelist:
+    - frdctrfront.paas.cmbchina.cn
+    - mccusweb.paas.cmbchina.cn
+    - cccsweb.paas.cmbchina.cn
     - frdctrfront.paasuat.cmbchina.cn
     - mccusweb.paasuat.cmbchina.cn
   url-builder:

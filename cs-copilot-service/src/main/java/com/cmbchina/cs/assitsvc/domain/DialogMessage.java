@@ -17,7 +17,7 @@ public class DialogMessage {
     /** 消息 ID，来自 sentenceId */
     private String id;
 
-    /** 角色：user（客户）/ assistant（坐席） */
+    /** 角色：由消费侧按 speakerRole 在出口阶段映射；写入阶段为 null */
     private String role;
 
     /** 语音识别原文 */

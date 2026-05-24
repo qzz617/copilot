@@ -1,13 +1,11 @@
 package com.cmbchina.cs.assitsvc.config;
 
 import com.cmbchina.cs.assitsvc.core.directive.UrlSecurityProperties;
-import com.cmbchina.cs.assitsvc.core.param.CookiePlaceholderValidator;
-import com.cmbchina.cs.assitsvc.domain.CopilotExt;
-import com.cmbchina.cs.assitsvc.domain.CopilotIndex;
-import com.cmbchina.cs.assitsvc.domain.ItemFullConfig;
+import com.cmbchina.cs.assitsvc.core.param.StandardParamType;
+import com.cmbchina.cs.assitsvc.domain.ActionReference;
+import com.cmbchina.cs.assitsvc.domain.CopilotActionConfig;
+import com.cmbchina.cs.assitsvc.domain.CopilotConfigSnapshot;
 import com.cmbchina.cs.assitsvc.domain.ItemParam;
-import com.cmbchina.cs.assitsvc.domain.ItemReference;
-import com.cmbchina.cs.assitsvc.domain.MenuVersionData;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -19,144 +17,159 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Copilot CLOB 基础校验实现。
+ * Copilot 配置基础校验实现。
  */
 @Service
 @RequiredArgsConstructor
 public class CopilotConfigValidationServiceImpl implements CopilotConfigValidationService {
 
     private final UrlSecurityProperties urlSecurityProperties;
-    private final CookiePlaceholderValidator cookiePlaceholderValidator;
 
     @Override
-    public ConfigValidationResult validate(MenuVersionData data) {
+    public ConfigValidationResult validate(CopilotConfigSnapshot snapshot) {
         List<String> errors = new ArrayList<>();
-        validateRoot(data, errors);
-        if (data != null && data.getCopilotIndex() != null) {
-            validateIndex(data.getCopilotIndex(), errors);
+        validateRoot(snapshot, errors);
+        if (snapshot != null) {
+            validateIndex(snapshot, errors);
         }
         return errors.isEmpty() ? ConfigValidationResult.ok() : ConfigValidationResult.fail(errors);
     }
 
-    private void validateRoot(MenuVersionData data, List<String> errors) {
-        if (data == null) {
-            errors.add("MenuVersionData must not be null");
+    private void validateRoot(CopilotConfigSnapshot snapshot, List<String> errors) {
+        if (snapshot == null) {
+            errors.add("CopilotConfigSnapshot must not be null");
             return;
         }
-        if (!StringUtils.hasText(data.getVersion())) {
-            errors.add("version must not be empty");
+        if (!StringUtils.hasText(snapshot.getVersionId())) {
+            errors.add("versionId must not be empty");
         }
-        if (data.getCopilotIndex() == null) {
-            errors.add("copilotIndex must not be null");
+        if (snapshot.getIntentToActions() == null) {
+            errors.add("intentToActions must not be null");
+        } else if (snapshot.getIntentToActions().isEmpty()) {
+            errors.add("intentToActions must not be empty");
+        }
+        if (snapshot.getActionById() == null) {
+            errors.add("actionById must not be null");
+        } else if (snapshot.getActionById().isEmpty()) {
+            errors.add("actionById must not be empty");
         }
     }
 
-    private void validateIndex(CopilotIndex index, List<String> errors) {
-        if (index.getIntentToItems() == null) {
-            errors.add("copilotIndex.intentToItems must not be null");
-        }
-        if (index.getItemById() == null) {
-            errors.add("copilotIndex.itemById must not be null");
-        }
-        if (index.getIntentToItems() == null || index.getItemById() == null) {
+    private void validateIndex(CopilotConfigSnapshot snapshot, List<String> errors) {
+        if (snapshot.getIntentToActions() == null || snapshot.getActionById() == null) {
             return;
         }
 
-        for (Map.Entry<String, List<ItemReference>> entry : index.getIntentToItems().entrySet()) {
-            validateIntentMapping(entry.getKey(), entry.getValue(), index.getItemById(), errors);
+        for (Map.Entry<String, List<ActionReference>> entry : snapshot.getIntentToActions().entrySet()) {
+            validateIntentMapping(entry.getKey(), entry.getValue(), snapshot.getActionById(), errors);
         }
     }
 
-    private void validateIntentMapping(String intentCode, List<ItemReference> refs,
-                                       Map<String, ItemFullConfig> itemById, List<String> errors) {
+    private void validateIntentMapping(String intentCode, List<ActionReference> refs,
+                                       Map<String, CopilotActionConfig> actionById, List<String> errors) {
         if (!StringUtils.hasText(intentCode)) {
-            errors.add("intentCode in intentToItems must not be empty");
+            errors.add("intentCode in intentToActions must not be empty");
         }
         if (refs == null || refs.isEmpty()) {
-            errors.add("intentToItems." + intentCode + " must not be empty");
+            errors.add("intentToActions." + intentCode + " must not be empty");
             return;
         }
-        for (ItemReference ref : refs) {
-            if (ref == null || ref.getItemId() == null) {
-                errors.add("intentToItems." + intentCode + " contains empty itemId");
+        for (ActionReference ref : refs) {
+            if (ref == null || !StringUtils.hasText(ref.getActionId())) {
+                errors.add("intentToActions." + intentCode + " contains empty actionId");
                 continue;
             }
-            ItemFullConfig item = itemById.get(String.valueOf(ref.getItemId()));
-            if (item == null) {
-                errors.add("itemById missing itemId=" + ref.getItemId());
+            CopilotActionConfig action = actionById.get(ref.getActionId());
+            if (action == null) {
+                errors.add("actionById missing actionId=" + ref.getActionId());
             } else {
-                validateItem(item, errors);
+                validateAction(action, errors);
             }
         }
     }
 
-    private void validateItem(ItemFullConfig item, List<String> errors) {
-        if (item.getItemId() == null) {
-            errors.add("item.itemId must not be null");
+    private void validateAction(CopilotActionConfig action, List<String> errors) {
+        if (!StringUtils.hasText(action.getActionId())) {
+            errors.add("action.actionId must not be empty");
         }
-        if (!StringUtils.hasText(item.getItemName())) {
-            errors.add("item.itemName must not be empty, itemId=" + item.getItemId());
+        if (!StringUtils.hasText(action.getActionName())) {
+            errors.add("action.actionName must not be empty, actionId=" + action.getActionId());
         }
 
-        CopilotExt ext = item.getCopilotExt();
-        String targetKind = ext != null && StringUtils.hasText(ext.getTargetKind())
-                ? ext.getTargetKind() : item.getTargetKind();
-        String openMode = ext != null && StringUtils.hasText(ext.getOpenMode())
-                ? ext.getOpenMode() : item.getOpenMode();
-        validateActionCombination(item.getItemId(), targetKind, openMode, errors);
-
-        String targetUrl = resolveTargetUrl(item, ext, targetKind);
-        if (requiresUrl(targetKind)) {
-            validateUrl(item.getItemId(), targetUrl, errors);
-        }
-        validateCookieParams(item, targetUrl, errors);
-    }
-
-    private void validateActionCombination(Long itemId, String targetKind, String openMode, List<String> errors) {
-        if (!StringUtils.hasText(targetKind) || !StringUtils.hasText(openMode)) {
-            errors.add("targetKind/openMode missing, itemId=" + itemId);
+        if (action.getMenuItemId() != null) {
             return;
         }
-        String pair = targetKind + "/" + openMode;
+
+        validateActionCombination(action.getActionId(), action.getTargetKind(), action.getOpenMode(), errors);
+
+        String targetUrl = resolveTargetUrl(action);
+        if (requiresUrl(action.getTargetKind())) {
+            validateUrl(action.getActionId(), targetUrl, errors);
+        } else if ("ROUTE".equalsIgnoreCase(action.getTargetKind()) && !StringUtils.hasText(targetUrl)) {
+            errors.add("routePath missing, actionId=" + action.getActionId());
+        }
+        validateParamConfigs(action, errors);
+    }
+
+    private void validateActionCombination(String actionId, String targetKind, String openMode, List<String> errors) {
+        if (!StringUtils.hasText(targetKind) || !StringUtils.hasText(openMode)) {
+            errors.add("targetKind/openMode missing, actionId=" + actionId);
+            return;
+        }
+        String pair = targetKind.toUpperCase() + "/" + openMode.toUpperCase();
         if (!"URL/CURRENT_TAB".equals(pair)
                 && !"URL/NEW_TAB".equals(pair)
                 && !"ROUTE/CURRENT_TAB".equals(pair)
                 && !"ROUTE/NEW_TAB".equals(pair)
-                && !"COMPONENT/POPUP".equals(pair)
-                && !"COMPONENT/DRAWER".equals(pair)
                 && !"IFRAME/IFRAME".equals(pair)
                 && !"NEW_WINDOW/WINDOW".equals(pair)) {
-            errors.add("unsupported targetKind/openMode=" + pair + ", itemId=" + itemId);
+            errors.add("unsupported targetKind/openMode=" + pair + ", actionId=" + actionId);
         }
     }
 
-    private void validateUrl(Long itemId, String targetUrl, List<String> errors) {
+    private void validateUrl(String actionId, String targetUrl, List<String> errors) {
         if (!StringUtils.hasText(targetUrl)) {
-            errors.add("target URL missing, itemId=" + itemId);
+            errors.add("target URL missing, actionId=" + actionId);
             return;
         }
         try {
             URI uri = new URI(targetUrl);
             if (!"https".equalsIgnoreCase(uri.getScheme())) {
-                errors.add("target URL must use https, itemId=" + itemId);
+                errors.add("target URL must use https, actionId=" + actionId);
             }
             if (!urlSecurityProperties.getUrlWhitelist().contains(uri.getHost())) {
-                errors.add("target URL domain not allowed, itemId=" + itemId + ", domain=" + uri.getHost());
+                errors.add("target URL domain not allowed, actionId=" + actionId + ", domain=" + uri.getHost());
             }
         } catch (URISyntaxException e) {
-            errors.add("target URL invalid, itemId=" + itemId);
+            errors.add("target URL invalid, actionId=" + actionId);
         }
     }
 
-    private void validateCookieParams(ItemFullConfig item, String targetUrl, List<String> errors) {
-        if (item.getParams() == null) {
+    private void validateParamConfigs(CopilotActionConfig action, List<String> errors) {
+        if (action.getParams() == null) {
             return;
         }
-        for (ItemParam param : item.getParams()) {
-            if (param != null && "COOKIE_PLACEHOLDER".equals(param.getParamType())
-                    && !cookiePlaceholderValidator.validate(param, targetUrl)) {
-                errors.add("cookie placeholder not allowed, itemId=" + item.getItemId()
+        for (ItemParam param : action.getParams()) {
+            if (param == null) {
+                errors.add("param config must not be null, actionId=" + action.getActionId());
+                continue;
+            }
+            if (!StringUtils.hasText(param.getParamType())) {
+                errors.add("paramType missing, actionId=" + action.getActionId()
                         + ", paramKey=" + param.getParamKey());
+                continue;
+            }
+            try {
+                StandardParamType.valueOf(param.getParamType());
+            } catch (IllegalArgumentException e) {
+                errors.add("unsupported paramType, actionId=" + action.getActionId()
+                        + ", paramType=" + param.getParamType()
+                        + ", allowed=CUST_NO,CUST_ID_NO,MOBPHN1,ACCOUNT_NO");
+                continue;
+            }
+            if (!StringUtils.hasText(param.getParamKey())) {
+                errors.add("paramKey missing, actionId=" + action.getActionId()
+                        + ", paramType=" + param.getParamType());
             }
         }
     }
@@ -167,16 +180,10 @@ public class CopilotConfigValidationServiceImpl implements CopilotConfigValidati
                 || "NEW_WINDOW".equalsIgnoreCase(targetKind);
     }
 
-    private static String resolveTargetUrl(ItemFullConfig item, CopilotExt ext, String targetKind) {
-        if ("ROUTE".equalsIgnoreCase(targetKind) && ext != null) {
-            return ext.getRoutePath();
+    private static String resolveTargetUrl(CopilotActionConfig action) {
+        if ("ROUTE".equalsIgnoreCase(action.getTargetKind())) {
+            return action.getRoutePath();
         }
-        if ("COMPONENT".equalsIgnoreCase(targetKind) && ext != null) {
-            return ext.getFallbackUrl();
-        }
-        if (StringUtils.hasText(item.getUrl())) {
-            return item.getUrl();
-        }
-        return ext == null ? null : ext.getFallbackUrl();
+        return action.getTargetUrl();
     }
 }

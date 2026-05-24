@@ -14,11 +14,14 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class FunctionInfo {
 
-    /** 功能 ID，前端权限校验用 */
-    private Long itemId;
+    /** Copilot 动作 ID */
+    private String actionId;
 
-    /** 功能名称 */
-    private String itemName;
+    /** Copilot 动作名称 */
+    private String actionName;
+
+    /** 可选快捷导航菜单 ID；纯意图唤起动作为空 */
+    private Long menuItemId;
 
     /** 功能路径，用于卡片展示 */
     private String functionPath;

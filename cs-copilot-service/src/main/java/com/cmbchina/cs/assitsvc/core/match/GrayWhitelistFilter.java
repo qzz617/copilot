@@ -4,7 +4,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
-import java.util.List;
+import java.util.Set;
 
 /**
  * 最简坐席灰度白名单过滤器。
@@ -26,7 +26,7 @@ public class GrayWhitelistFilter {
             return true;
         }
 
-        List<String> whitelist = props.getOperatorWhitelist();
+        Set<String> whitelist = props.getOperatorWhitelist();
         if (whitelist == null || whitelist.isEmpty()) {
             return true;
         }

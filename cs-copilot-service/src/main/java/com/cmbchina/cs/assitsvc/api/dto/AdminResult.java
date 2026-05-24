@@ -35,6 +35,6 @@ public class AdminResult {
     /** 意图映射数量。 */
     private Integer intentMappingCount;
 
-    /** Copilot 启用功能数量。 */
-    private Integer copilotEnabledItemCount;
+    /** Copilot 启用动作数量。 */
+    private Integer copilotEnabledActionCount;
 }
