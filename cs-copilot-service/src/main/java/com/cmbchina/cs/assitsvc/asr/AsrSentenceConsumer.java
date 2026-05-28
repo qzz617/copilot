@@ -67,6 +67,9 @@ public class AsrSentenceConsumer {
         if (!"CUSTOMER".equalsIgnoreCase(event.getSpeakerRole())) {
             return;
         }
+        if (!routeValid(event, recordKey, partition, offset)) {
+            return;
+        }
         if (!triggerValid(event)) {
             return;
         }

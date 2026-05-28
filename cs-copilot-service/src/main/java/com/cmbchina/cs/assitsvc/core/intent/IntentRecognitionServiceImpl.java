@@ -17,6 +17,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 
@@ -61,7 +62,11 @@ public class IntentRecognitionServiceImpl implements IntentRecognitionService {
 
         try {
             IntentRecognitionResponse response = feignClient.recognize(request);
-            return parseResponse(callId, request.getRequestId(), response);
+            IntentRecognitionOutcome outcome = parseResponse(callId, request.getRequestId(), response);
+            if (outcome.isSuccess()) {
+                incrementAiCallCount(callId);
+            }
+            return outcome;
         } catch (FeignException e) {
             log.warn("[M06] AI intent recognition failed, callId={}, status={}", callId, e.status(), e);
             throw e;
@@ -126,6 +131,20 @@ public class IntentRecognitionServiceImpl implements IntentRecognitionService {
                 .intentCode(data.getIntentCode())
                 .intentName(data.getIntentName())
                 .build());
+    }
+
+    private void incrementAiCallCount(String callId) {
+        String key = AI_COUNT_KEY_PREFIX + callId + AI_COUNT_KEY_SUFFIX;
+        try {
+            Long count = redisTemplate.execute(AI_COUNT_SCRIPT,
+                    Collections.singletonList(key),
+                    String.valueOf(AI_COUNT_TTL_SECONDS));
+            if (count != null && count > maxAiCalls) {
+                log.warn("[M06] AI call count exceeded after success, callId={}, count={}", callId, count);
+            }
+        } catch (DataAccessException e) {
+            log.warn("[M06] Redis AI call count increment failed, callId={}", callId, e);
+        }
     }
 
     private static String generateRequestId() {

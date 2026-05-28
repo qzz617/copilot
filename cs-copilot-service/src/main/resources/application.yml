@@ -127,6 +127,10 @@ copilot:
   directive:
     expire-seconds: 30
 
+  # 指令有效期
+  directive:
+    expire-seconds: 30
+
   # 灰度白名单（DD-V1.2 P1-9，最简方案）
   gray:
     enabled: true
